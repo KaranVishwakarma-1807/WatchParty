@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Watch Party</title>
+  <link rel="stylesheet" href="watch-party.css" />
+</head>
+<body>
+  <div class="ambient a"></div>
+  <div class="ambient b"></div>
+
+  <main class="shell">
+    <header class="glass topbar">
+      <h1>Watch Party</h1>
+      <p id="statusText">Join a room to start.</p>
+    </header>
+
+    <section class="glass join-card">
+      <label>
+        Room ID
+        <input id="roomInput" type="text" placeholder="movie-night" />
+      </label>
+      <label>
+        Your Name
+        <input id="nameInput" type="text" placeholder="Alex" />
+      </label>
+      <button id="joinBtn" type="button">Join Room</button>
+    </section>
+
+    <section class="layout">
+      <article class="glass player-card">
+        <video id="videoPlayer" playsinline></video>
+        <p id="videoTitle" class="video-title">No video uploaded yet.</p>
+
+        <section class="controls">
+          <button id="playPauseBtn" type="button">Play</button>
+          <button id="muteBtn" type="button">Mute</button>
+          <button id="fullscreenBtn" type="button">Fullscreen</button>
+          <label>
+            Volume
+            <input id="volumeRange" type="range" min="0" max="1" step="0.01" value="1" />
+          </label>
+          <label>
+            Seek
+            <input id="seekRange" type="range" min="0" max="100" step="0.1" value="0" />
+          </label>
+          <span id="timeText">00:00 / 00:00</span>
+        </section>
+      </article>
+
+      <aside class="glass side-card">
+        <h2>Room</h2>
+        <p id="roleText">Role: Viewer</p>
+        <p id="hostText">Host: -</p>
+
+        <div class="upload-box">
+          <label for="uploadInput" class="upload-label">Upload Video (Host)</label>
+          <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
+          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Uploaded Video</button>
+        </div>
+
+        <h3>Members</h3>
+        <ul id="memberList"></ul>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="watch-party.js"></script>
+</body>
+</html>
