@@ -6,7 +6,7 @@ const { Server } = require("socket.io");
 const dotenv = require("dotenv");
 const { BlobServiceClient } = require("@azure/storage-blob");
 
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 const server = http.createServer(app);
@@ -90,6 +90,7 @@ function buildBlobName(roomId, originalName) {
 
 async function uploadVideoBufferToAzure({ roomId, originalName, buffer, contentType }) {
   ensureAzureReady();
+  await containerClient.createIfNotExists();
 
   const blobName = buildBlobName(roomId, originalName);
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
@@ -172,7 +173,7 @@ app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
     return res.json({ ok: true, video: room.video });
   } catch (error) {
     console.error("Upload failed:", error.message);
-    return res.status(500).json({ error: "Upload failed." });
+    return res.status(500).json({ error: `Upload failed: ${error.message}` });
   }
 });
 
@@ -329,3 +330,5 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
