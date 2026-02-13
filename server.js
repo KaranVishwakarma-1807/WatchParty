@@ -1,41 +1,40 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const { Server } = require("socket.io");
+const dotenv = require("dotenv");
+const { BlobServiceClient } = require("@azure/storage-blob");
+
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const uploadsDir = path.join(__dirname, "uploads");
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+const sasToken = String(process.env.SAS_TOKEN || "").trim().replace(/^\?/, "");
+const accountName = String(process.env.ACCOUNT_NAME || "").trim();
+const containerName = String(process.env.CONTAINER_NAME || "").trim();
+
+let containerClient = null;
+if (sasToken && accountName && containerName) {
+  const serviceUrl = `https://${accountName}.blob.core.windows.net?${sasToken}`;
+  const blobServiceClient = new BlobServiceClient(serviceUrl);
+  containerClient = blobServiceClient.getContainerClient(containerName);
+} else {
+  console.warn("Azure Blob config is missing. Upload endpoints will fail until env values are set.");
 }
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadsDir),
-    filename: (_req, file, cb) => {
-      const safe = file.originalname.replace(/[^\w.-]/g, "_");
-      cb(null, `${Date.now()}_${safe}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 1024 * 1024 * 1024,
+  },
 });
 
 const rooms = new Map();
-
-function removeUploadedFile(fileUrl) {
-  if (!fileUrl) return;
-  const fileName = path.basename(fileUrl);
-  const filePath = path.join(uploadsDir, fileName);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-}
 
 function getRoom(roomId) {
   if (!rooms.has(roomId)) {
@@ -73,16 +72,62 @@ function syncPayload(room) {
   };
 }
 
+function ensureAzureReady() {
+  if (!containerClient) {
+    throw new Error("Azure Blob Storage is not configured.");
+  }
+}
+
+function safeFileName(originalName) {
+  return String(originalName || "video")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function buildBlobName(roomId, originalName) {
+  return `${roomId}/${Date.now()}_${safeFileName(originalName)}`;
+}
+
+async function uploadVideoBufferToAzure({ roomId, originalName, buffer, contentType }) {
+  ensureAzureReady();
+
+  const blobName = buildBlobName(roomId, originalName);
+  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+  await blockBlobClient.uploadData(buffer, {
+    blobHTTPHeaders: {
+      blobContentType: contentType || "application/octet-stream",
+    },
+  });
+
+  return {
+    blobName,
+    fileUrl: blockBlobClient.url,
+  };
+}
+
+async function removeUploadedBlob(blobName) {
+  if (!blobName) return;
+  try {
+    ensureAzureReady();
+    const blobClient = containerClient.getBlockBlobClient(blobName);
+    await blobClient.deleteIfExists();
+  } catch (error) {
+    console.error("Failed to delete blob:", error.message);
+  }
+}
+
 app.use(express.json());
-app.use("/uploads", express.static(uploadsDir));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "watch-party.html"));
 });
 
-app.post("/api/upload/:roomId", upload.single("video"), (req, res) => {
+app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
   try {
+    ensureAzureReady();
+
     const roomId = normalizeRoomId(req.params.roomId);
     const socketId = req.body.socketId;
     const room = rooms.get(roomId);
@@ -95,15 +140,24 @@ app.post("/api/upload/:roomId", upload.single("video"), (req, res) => {
       return res.status(400).json({ error: "Video file is required." });
     }
 
-    if (room.video?.fileUrl) {
-      removeUploadedFile(room.video.fileUrl);
+    if (room.video?.blobName) {
+      await removeUploadedBlob(room.video.blobName);
     }
+
+    const uploaded = await uploadVideoBufferToAzure({
+      roomId,
+      originalName: req.file.originalname,
+      buffer: req.file.buffer,
+      contentType: req.file.mimetype,
+    });
 
     room.video = {
       fileName: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
+      fileUrl: uploaded.fileUrl,
+      blobName: uploaded.blobName,
       uploadedAt: Date.now(),
     };
+
     room.state = {
       currentTime: 0,
       isPlaying: false,
@@ -117,11 +171,12 @@ app.post("/api/upload/:roomId", upload.single("video"), (req, res) => {
 
     return res.json({ ok: true, video: room.video });
   } catch (error) {
+    console.error("Upload failed:", error.message);
     return res.status(500).json({ error: "Upload failed." });
   }
 });
 
-app.post("/api/clear-upload/:roomId", (req, res) => {
+app.post("/api/clear-upload/:roomId", async (req, res) => {
   try {
     const roomId = normalizeRoomId(req.params.roomId);
     const socketId = req.body.socketId;
@@ -131,8 +186,8 @@ app.post("/api/clear-upload/:roomId", (req, res) => {
       return res.status(403).json({ error: "Only the room host can clear uploaded video." });
     }
 
-    if (room.video?.fileUrl) {
-      removeUploadedFile(room.video.fileUrl);
+    if (room.video?.blobName) {
+      await removeUploadedBlob(room.video.blobName);
     }
 
     room.video = null;
@@ -147,7 +202,8 @@ app.post("/api/clear-upload/:roomId", (req, res) => {
     });
 
     return res.json({ ok: true });
-  } catch (_error) {
+  } catch (error) {
+    console.error("Clear upload failed:", error.message);
     return res.status(500).json({ error: "Failed to clear uploaded video." });
   }
 });
@@ -255,8 +311,8 @@ io.on("connection", (socket) => {
     }
 
     if (room.members.size === 0) {
-      if (room.video?.fileUrl) {
-        removeUploadedFile(room.video.fileUrl);
+      if (room.video?.blobName) {
+        void removeUploadedBlob(room.video.blobName);
       }
       rooms.delete(roomId);
       return;
