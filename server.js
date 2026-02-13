@@ -14,17 +14,31 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 
-const sasToken = String(process.env.SAS_TOKEN || "").trim().replace(/^\?/, "");
-const accountName = String(process.env.ACCOUNT_NAME || "").trim();
-const containerName = String(process.env.CONTAINER_NAME || "").trim();
+function cleanEnvValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .replace(/^'+|'+$/g, "");
+}
+
+const sasToken = cleanEnvValue(process.env.SAS_TOKEN || process.env.AZURE_STORAGE_SAS_TOKEN).replace(/^\?/, "");
+const accountName = cleanEnvValue(process.env.ACCOUNT_NAME || process.env.AZURE_STORAGE_ACCOUNT_NAME);
+const containerName = cleanEnvValue(process.env.CONTAINER_NAME || process.env.AZURE_STORAGE_CONTAINER_NAME);
 
 let containerClient = null;
+let azureConfigError = "";
+
 if (sasToken && accountName && containerName) {
   const serviceUrl = `https://${accountName}.blob.core.windows.net?${sasToken}`;
   const blobServiceClient = new BlobServiceClient(serviceUrl);
   containerClient = blobServiceClient.getContainerClient(containerName);
 } else {
-  console.warn("Azure Blob config is missing. Upload endpoints will fail until env values are set.");
+  const missing = [];
+  if (!sasToken) missing.push("SAS_TOKEN");
+  if (!accountName) missing.push("ACCOUNT_NAME");
+  if (!containerName) missing.push("CONTAINER_NAME");
+  azureConfigError = `Missing env: ${missing.join(", ")}`;
+  console.warn(`Azure Blob config is missing. ${azureConfigError}`);
 }
 
 const upload = multer({
@@ -74,7 +88,7 @@ function syncPayload(room) {
 
 function ensureAzureReady() {
   if (!containerClient) {
-    throw new Error("Azure Blob Storage is not configured.");
+    throw new Error(`Azure Blob Storage is not configured. ${azureConfigError}`.trim());
   }
 }
 
@@ -330,5 +344,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
-
-
