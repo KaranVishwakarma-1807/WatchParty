@@ -6,7 +6,7 @@ const { Server } = require("socket.io");
 const dotenv = require("dotenv");
 const { BlobServiceClient } = require("@azure/storage-blob");
 
-dotenv.config({ path: path.join(__dirname, ".env") });
+dotenv.config({ path: path.join(__dirname, ".env"), override: true });
 
 const app = express();
 const server = http.createServer(app);
@@ -344,3 +344,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
