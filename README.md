@@ -1,85 +1,59 @@
-# Watch Party App (Socket.IO + Azure Blob)
+# WatchParty v1
 
-A real-time watch-party app where friends join a room, the host controls playback, and uploaded videos are managed in a moderated playlist.
+A real-time watch-party web app where a host and friends watch synchronized media together in a room.
 
-## Current Status
+## What This App Does
 
-The project is now running with:
+WatchParty lets users join a shared room and watch content in sync. The host controls playback for everyone. Media can come from Azure Blob uploads or a YouTube link, and all viewers stay aligned through Socket.IO events.
 
-- Real-time room sync (play/pause/seek)
-- Host-controlled playlist
-- Azure Blob Storage uploads
-- Viewer request queue with host approve/reject
-- Per-item playlist deletion by host
-- Upload progress UI
+## Core Features
 
-## Features
+### Real-Time Room Sync
 
-- Room join with `roomId` and display name
-- Automatic host assignment (first user in room)
-- Host-only playback control sync:
+- Join by `roomId` and display name.
+- First user becomes host automatically.
+- Host controls are synced to all viewers:
   - Play
   - Pause
   - Seek
-- Host direct upload to playlist (stored in Azure Blob)
-- Viewer upload requests:
-  - Viewer submits request file
-  - Host approves or rejects
-  - Approved videos are added to playlist
-  - Rejected request blobs are deleted
-- Playlist management:
-  - Select active video from playlist
-  - Delete specific playlist item
-  - Clear current video
-- Upload progress indicator
-- Host handover when current host disconnects
+  - Periodic playback state updates
+- Host role handover happens automatically if host disconnects.
+
+### Media Sources
+
+- Host direct video upload to Azure Blob Storage.
+- Viewer upload request queue (host approval workflow).
+- Host can paste a YouTube URL and switch room playback to synced YouTube mode.
+- Host can clear current media (Blob or YouTube).
+
+### Playlist and Queue Management
+
+- Playlist is visible to room members.
+- Host can select any playlist item to play.
+- Host can delete a specific playlist item.
+- Viewer requests can be approved or rejected by host.
+- Playlist can sync from existing blobs under room prefix.
+
+### Upload UX
+
+- Upload progress bar and percent text for user actions.
+- Host upload and viewer request both use progress-aware XHR flow.
+
+### Player Controls (Current)
+
+- Play/Pause
+- Mute/Unmute
+- Fullscreen
+- Volume slider
+- Seek slider + live time display
 
 ## Tech Stack
 
-- Backend: Node.js, Express, Socket.IO
-- Frontend: Vanilla HTML/CSS/JS
-- Upload handling: Multer (`memoryStorage`)
-- Storage: Azure Blob Storage (`@azure/storage-blob`)
-- Config: dotenv
-
-## Environment Variables
-
-Set these in local `.env` and in Azure App Service Application Settings:
-
-```env
-SAS_TOKEN=...
-ACCOUNT_NAME=...
-CONTAINER_NAME=...
-PORT=3000
-```
-
-Supported aliases in code:
-
-- `AZURE_STORAGE_SAS_TOKEN`
-- `AZURE_STORAGE_ACCOUNT_NAME`
-- `AZURE_STORAGE_CONTAINER_NAME`
-
-## Run Locally
-
-1. Install dependencies
-
-```bash
-npm install
-```
-
-2. Set `.env`
-
-3. Start server
-
-```bash
-npm start
-```
-
-4. Open
-
-```text
-http://localhost:3000
-```
+- Node.js + Express
+- Socket.IO (real-time room communication)
+- Multer (`memoryStorage`) for in-memory upload handling
+- Azure Blob Storage (`@azure/storage-blob`)
+- Vanilla HTML/CSS/JS frontend
 
 ## Project Structure
 
@@ -87,22 +61,50 @@ http://localhost:3000
 WatchParty/
   server.js
   package.json
+  README.md
   public/
     watch-party.html
     watch-party.css
     watch-party.js
 ```
 
-## API Endpoints
+## Environment Variables
 
-- `POST /api/upload/:roomId` (host direct upload)
-- `POST /api/request-upload/:roomId` (viewer request upload)
-- `POST /api/request-action/:roomId` (host approve/reject request)
-- `POST /api/select-video/:roomId` (host sets active playlist video)
-- `POST /api/delete-video/:roomId` (host deletes specific playlist video)
-- `POST /api/clear-upload/:roomId` (host clears current video)
+Create `.env` (local) and set same values in Azure App Service Application Settings:
 
-## Socket Events
+```env
+PORT=3000
+SAS_TOKEN=...
+ACCOUNT_NAME=...
+CONTAINER_NAME=...
+```
+
+Supported aliases:
+
+- `AZURE_STORAGE_SAS_TOKEN`
+- `AZURE_STORAGE_ACCOUNT_NAME`
+- `AZURE_STORAGE_CONTAINER_NAME`
+
+## Run Locally
+
+```bash
+npm install
+npm start
+```
+
+Open `http://localhost:3000`.
+
+## Main API Endpoints
+
+- `POST /api/upload/:roomId` - host uploads directly to playlist
+- `POST /api/request-upload/:roomId` - viewer submits upload request
+- `POST /api/request-action/:roomId` - host approves/rejects a request
+- `POST /api/select-video/:roomId` - host switches active playlist video
+- `POST /api/delete-video/:roomId` - host deletes one playlist item
+- `POST /api/set-youtube/:roomId` - host sets YouTube media for room
+- `POST /api/clear-upload/:roomId` - host clears current media
+
+## Main Socket Events
 
 Client -> Server:
 
@@ -118,65 +120,86 @@ Server -> Client:
 - `room-state`
 - `playlist-updated`
 - `queue-updated`
-- `room-video-changed`
-- `room-video-cleared`
+- `room-media-changed`
+- `room-media-cleared`
 - `sync-state`
 - `room-members`
 - `host-changed`
 
-## Current Limitations
+## Known Limitations in v1
 
-- In-memory room state (not persistent across server restart)
-- 1 GB per upload request limit in current Multer config
-- No authentication/authorization yet
-- No database-backed metadata yet
+- Room state is in memory (resets on server restart).
+- No authentication/authorization yet.
+- No persistent database for room metadata yet.
+- Large upload reliability depends on plan limits/network conditions.
 
-## Future Plans (Roadmap)
+## Future Potential Updates
 
-### 1. Communication Layer
+### v1.1
 
-- Real-time text chat per room
-- Message history persistence
-- File/image sharing in chat
-- Reactions and typing indicators
+- Role-based permissions (host, co-host, viewer).
+- Stronger moderation controls for queue and playlist.
+- Better reconnect/resync logic for unstable networks.
 
-### 2. Video Call Integration
+### v1.2
 
-- In-room video/audio call (WebRTC)
-- Host controls for mute/video moderation
-- Grid/pinned participant layout
-- Call quality adaptation
+- Real-time in-room text chat.
+- Reactions, typing indicators, and message history.
+- Room-level activity logs.
 
-### 3. Custom Room System
+### v2.0
 
-- Public/private rooms
-- Room password / invite links
-- Room roles (host, co-host, viewer)
-- Custom room themes, names, and room settings
-- Scheduled rooms and recurring events
+- User accounts and authentication (OAuth/email).
+- Custom room system:
+  - private/public rooms
+  - invite codes
+  - password-protected rooms
+  - room presets
+- Persistent metadata database (recommended: PostgreSQL).
 
-### 4. Platform and Scaling
+### v2.1
 
-- PostgreSQL for room/playlist/request metadata
-- Redis for distributed real-time room state
-- Multi-instance Socket.IO scale-out
-- Background jobs for blob cleanup and queue expiry
+- Video/audio call integration (WebRTC).
+- Participant grid and host moderation controls.
+- Optional voice-only mode.
 
-### 5. Security and Productization
+### v2.2+
 
-- User auth (OAuth/email)
-- Permission checks by role
-- Audit logs for moderation actions
-- Rate limiting and abuse protection
+- Multi-instance scaling with Redis + Socket.IO adapter.
+- Background jobs for cleanup and queue expiry.
+- HLS/transcoding pipeline for smoother large-file playback.
 
-## Recommended Production Architecture
+## Database Recommendation
 
-- App: Azure App Service (Node.js)
-- Storage: Azure Blob Storage
-- Metadata DB: PostgreSQL
-- Realtime scale: Redis/Web PubSub strategy
+For production metadata (rooms, playlist entries, queue state, users), use PostgreSQL. Keep large media files in Azure Blob Storage. Optionally add Redis for realtime scaling/session state.
 
-## Notes
+## Versioning and Release Plan (GitHub)
 
-- For Azure deployment, use App Service Application Settings instead of relying on `.env` in production.
-- Blob URLs and SAS handling should be hardened before public launch.
+Use semantic versioning.
+
+### Suggested baseline
+
+- `v1.0.0`: current stable watch-party app.
+
+### Commands to publish v1
+
+```bash
+git checkout -b release/v1.0.0
+git add .
+git commit -m "release: v1.0.0 watchparty core"
+git push -u origin release/v1.0.0
+git tag -a v1.0.0 -m "WatchParty v1.0.0"
+git push origin v1.0.0
+```
+
+Then on GitHub:
+
+1. Open Releases.
+2. Create a new release from tag `v1.0.0`.
+3. Add release notes (features, known limitations, next roadmap).
+
+### Ongoing version strategy
+
+- Patch: `v1.0.1` for bug fixes only.
+- Minor: `v1.1.0` for backward-compatible new features.
+- Major: `v2.0.0` for breaking architecture/product changes.
