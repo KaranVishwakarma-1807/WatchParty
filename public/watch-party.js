@@ -7,6 +7,9 @@ const statusText = document.getElementById("statusText");
 const roleText = document.getElementById("roleText");
 const hostText = document.getElementById("hostText");
 const memberList = document.getElementById("memberList");
+const playlistList = document.getElementById("playlistList");
+const requestQueueList = document.getElementById("requestQueueList");
+const uploadLabel = document.getElementById("uploadLabel");
 const uploadInput = document.getElementById("uploadInput");
 const clearUploadBtn = document.getElementById("clearUploadBtn");
 const uploadProgressWrap = document.getElementById("uploadProgressWrap");
@@ -24,6 +27,9 @@ const timeText = document.getElementById("timeText");
 
 let currentRoomId = "";
 let currentHostId = "";
+let currentVideoId = null;
+let playlist = [];
+let pendingRequests = [];
 let selfId = "";
 let isHost = false;
 let applyingRemote = false;
@@ -36,17 +42,169 @@ function formatTime(seconds) {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+function shorten(name, maxLen = 42) {
+  if (!name) return "Untitled";
+  if (name.length <= maxLen) return name;
+  return `${name.slice(0, maxLen - 3)}...`;
+}
+
+function renderPlaylist() {
+  playlistList.innerHTML = "";
+
+  if (!playlist.length) {
+    const li = document.createElement("li");
+    li.className = "playlist-item";
+    li.textContent = "No videos yet.";
+    playlistList.appendChild(li);
+    return;
+  }
+
+  playlist.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = `playlist-item${item.id === currentVideoId ? " active" : ""}`;
+
+    const title = document.createElement("span");
+    title.className = "playlist-title";
+    title.textContent = shorten(item.fileName);
+    title.title = `${item.fileName}${item.uploadedByName ? ` - by ${item.uploadedByName}` : ""}`;
+    li.appendChild(title);
+
+    if (isHost) {
+      title.addEventListener("click", async () => {
+        if (item.id === currentVideoId) return;
+        try {
+          const response = await fetch(`/api/select-video/${currentRoomId}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ socketId: selfId, videoId: item.id }),
+          });
+
+          const result = await response.json();
+          if (!response.ok) {
+            statusText.textContent = result.error || "Failed to select video.";
+            return;
+          }
+          statusText.textContent = `Selected: ${result.video.fileName}`;
+        } catch {
+          statusText.textContent = "Failed to select video.";
+        }
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "playlist-delete";
+      delBtn.type = "button";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", async () => {
+        try {
+          const response = await fetch(`/api/delete-video/${currentRoomId}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ socketId: selfId, videoId: item.id }),
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            statusText.textContent = result.error || "Failed to delete video.";
+            return;
+          }
+          statusText.textContent = `Deleted: ${item.fileName}`;
+        } catch {
+          statusText.textContent = "Failed to delete video.";
+        }
+      });
+      li.appendChild(delBtn);
+    }
+
+    playlistList.appendChild(li);
+  });
+}
+
+function renderRequestQueue() {
+  requestQueueList.innerHTML = "";
+
+  if (!pendingRequests.length) {
+    const li = document.createElement("li");
+    li.className = "request-item";
+    li.textContent = "No pending requests.";
+    requestQueueList.appendChild(li);
+    return;
+  }
+
+  pendingRequests.forEach((request) => {
+    const li = document.createElement("li");
+    li.className = "request-item";
+
+    const name = document.createElement("div");
+    name.textContent = shorten(request.fileName, 36);
+    name.title = request.fileName;
+    li.appendChild(name);
+
+    const meta = document.createElement("div");
+    meta.className = "request-meta";
+    meta.textContent = `Requested by ${request.requestedByName}`;
+    li.appendChild(meta);
+
+    if (isHost) {
+      const actions = document.createElement("div");
+      actions.className = "request-actions";
+
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "request-action approve";
+      approve.textContent = "Approve";
+      approve.addEventListener("click", () => actOnRequest(request.id, "approve", request.fileName));
+
+      const reject = document.createElement("button");
+      reject.type = "button";
+      reject.className = "request-action reject";
+      reject.textContent = "Reject";
+      reject.addEventListener("click", () => actOnRequest(request.id, "reject", request.fileName));
+
+      actions.appendChild(approve);
+      actions.appendChild(reject);
+      li.appendChild(actions);
+    }
+
+    requestQueueList.appendChild(li);
+  });
+}
+
+async function actOnRequest(requestId, action, fileName) {
+  try {
+    const response = await fetch(`/api/request-action/${currentRoomId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ socketId: selfId, requestId, action }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      statusText.textContent = result.error || "Failed to process request.";
+      return;
+    }
+    statusText.textContent = `${action === "approve" ? "Approved" : "Rejected"}: ${fileName}`;
+  } catch {
+    statusText.textContent = "Failed to process request.";
+  }
+}
+
 function updateRoleUI() {
   roleText.textContent = `Role: ${isHost ? "Host" : "Viewer"}`;
-  uploadInput.disabled = !isHost;
+  uploadLabel.textContent = isHost ? "Upload Video (Host Direct)" : "Request Video Add";
   clearUploadBtn.disabled = !isHost;
+
   if (isHost) {
-    uploadInput.classList.remove("disabled");
     clearUploadBtn.classList.remove("disabled");
   } else {
-    uploadInput.classList.add("disabled");
     clearUploadBtn.classList.add("disabled");
   }
+
+  renderPlaylist();
+  renderRequestQueue();
 }
 
 function updateMembers(members) {
@@ -60,11 +218,14 @@ function updateMembers(members) {
 
 function applyVideo(videoInfo) {
   if (!videoInfo) return;
+  currentVideoId = videoInfo.id || currentVideoId;
   video.src = videoInfo.fileUrl;
   videoTitle.textContent = `Now playing: ${videoInfo.fileName}`;
+  renderPlaylist();
 }
 
 function clearVideoFromUI() {
+  currentVideoId = null;
   video.pause();
   video.removeAttribute("src");
   video.load();
@@ -72,6 +233,7 @@ function clearVideoFromUI() {
   timeText.textContent = "00:00 / 00:00";
   seekRange.value = 0;
   playPauseBtn.textContent = "Play";
+  renderPlaylist();
 }
 
 async function applyRemoteState(payload) {
@@ -110,6 +272,7 @@ function resetUploadProgress(delayMs = 1200) {
     uploadProgressWrap.classList.add("hidden");
   }, delayMs);
 }
+
 function emitHostState(eventName) {
   if (!isHost || !video.src || applyingRemote) return;
   socket.emit(eventName, { time: video.currentTime, isPlaying: !video.paused });
@@ -128,7 +291,7 @@ joinBtn.addEventListener("click", () => {
 });
 
 uploadInput.addEventListener("change", async (event) => {
-  if (!isHost || !currentRoomId) return;
+  if (!currentRoomId) return;
   const file = event.target.files?.[0];
   if (!file) return;
 
@@ -136,18 +299,21 @@ uploadInput.addEventListener("change", async (event) => {
   formData.append("video", file);
   formData.append("socketId", selfId);
 
+  const endpoint = isHost ? `/api/upload/${currentRoomId}` : `/api/request-upload/${currentRoomId}`;
+  const progressText = isHost ? "uploaded" : "requested";
+
   setUploadProgress(0, "0%");
-  statusText.textContent = `Uploading ${file.name}...`;
+  statusText.textContent = isHost ? `Uploading ${file.name}...` : `Submitting request for ${file.name}...`;
 
   try {
     const result = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", `/api/upload/${currentRoomId}`);
+      xhr.open("POST", endpoint);
 
       xhr.upload.onprogress = (progressEvent) => {
         if (!progressEvent.lengthComputable) return;
         const percent = (progressEvent.loaded / progressEvent.total) * 100;
-        setUploadProgress(percent, `${Math.round(percent)}% uploaded`);
+        setUploadProgress(percent, `${Math.round(percent)}% ${progressText}`);
       };
 
       xhr.onload = () => {
@@ -169,8 +335,8 @@ uploadInput.addEventListener("change", async (event) => {
       xhr.send(formData);
     });
 
-    setUploadProgress(100, "Upload complete");
-    statusText.textContent = `Uploaded: ${result.video.fileName}`;
+    setUploadProgress(100, isHost ? "Upload complete" : "Request submitted");
+    statusText.textContent = isHost ? `Uploaded: ${result.video.fileName}` : "Request submitted to host.";
     resetUploadProgress();
   } catch (error) {
     statusText.textContent = error.message || "Upload failed.";
@@ -194,12 +360,12 @@ clearUploadBtn.addEventListener("click", async () => {
     });
     const result = await response.json();
     if (!response.ok) {
-      statusText.textContent = result.error || "Failed to clear uploaded video.";
+      statusText.textContent = result.error || "Failed to clear current video.";
       return;
     }
-    statusText.textContent = "Uploaded video cleared.";
+    statusText.textContent = "Current video cleared.";
   } catch {
-    statusText.textContent = "Failed to clear uploaded video.";
+    statusText.textContent = "Failed to clear current video.";
   }
 });
 
@@ -268,10 +434,14 @@ socket.on("connect", () => {
   selfId = socket.id;
 });
 
-socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, video: roomVideo, state, members }) => {
+socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, video: roomVideo, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
   currentRoomId = roomId;
   isHost = hostRole;
   currentHostId = hostId;
+  playlist = Array.isArray(roomPlaylist) ? roomPlaylist : [];
+  pendingRequests = Array.isArray(queue) ? queue : [];
+  currentVideoId = activeVideoId || null;
+
   updateRoleUI();
   updateMembers(members);
 
@@ -285,6 +455,17 @@ socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, video: roomVi
   } else {
     clearVideoFromUI();
   }
+});
+
+socket.on("playlist-updated", ({ playlist: roomPlaylist, currentVideoId: activeVideoId }) => {
+  playlist = Array.isArray(roomPlaylist) ? roomPlaylist : [];
+  currentVideoId = activeVideoId || null;
+  renderPlaylist();
+});
+
+socket.on("queue-updated", ({ pendingRequests: queue }) => {
+  pendingRequests = Array.isArray(queue) ? queue : [];
+  renderRequestQueue();
 });
 
 socket.on("room-video-changed", async ({ video: roomVideo, state }) => {
@@ -320,5 +501,3 @@ document.addEventListener("visibilitychange", () => {
     socket.emit("request-sync");
   }
 });
-
-

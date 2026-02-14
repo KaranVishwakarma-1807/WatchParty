@@ -1,42 +1,81 @@
-# Watch Party App (Socket.IO)
+# Watch Party App (Socket.IO + Azure Blob)
 
-A real-time watch-party app where friends join a room, the host uploads a video, and playback stays synchronized for everyone.
+A real-time watch-party app where friends join a room, the host controls playback, and uploaded videos are managed in a moderated playlist.
 
-## Built With
+## Current Status
 
-- Node.js + Express
-- Socket.IO (real-time sync)
-- Multer (video upload)
-- Vanilla HTML/CSS/JS frontend
+The project is now running with:
 
-## Current Flow
+- Real-time room sync (play/pause/seek)
+- Host-controlled playlist
+- Azure Blob Storage uploads
+- Viewer request queue with host approve/reject
+- Per-item playlist deletion by host
+- Upload progress UI
 
-1. User joins a room (`roomId`) with a display name.
-2. First user in room becomes **Host**.
-3. Host uploads one video for the room.
-4. All users in the room get the same video.
-5. Host actions sync to viewers in real time:
-   - Play
-   - Pause
-   - Seek
-6. Host can clear the current uploaded video for everyone.
-7. If host disconnects, a new host is assigned automatically.
+## Features
+
+- Room join with `roomId` and display name
+- Automatic host assignment (first user in room)
+- Host-only playback control sync:
+  - Play
+  - Pause
+  - Seek
+- Host direct upload to playlist (stored in Azure Blob)
+- Viewer upload requests:
+  - Viewer submits request file
+  - Host approves or rejects
+  - Approved videos are added to playlist
+  - Rejected request blobs are deleted
+- Playlist management:
+  - Select active video from playlist
+  - Delete specific playlist item
+  - Clear current video
+- Upload progress indicator
+- Host handover when current host disconnects
+
+## Tech Stack
+
+- Backend: Node.js, Express, Socket.IO
+- Frontend: Vanilla HTML/CSS/JS
+- Upload handling: Multer (`memoryStorage`)
+- Storage: Azure Blob Storage (`@azure/storage-blob`)
+- Config: dotenv
+
+## Environment Variables
+
+Set these in local `.env` and in Azure App Service Application Settings:
+
+```env
+SAS_TOKEN=...
+ACCOUNT_NAME=...
+CONTAINER_NAME=...
+PORT=3000
+```
+
+Supported aliases in code:
+
+- `AZURE_STORAGE_SAS_TOKEN`
+- `AZURE_STORAGE_ACCOUNT_NAME`
+- `AZURE_STORAGE_CONTAINER_NAME`
 
 ## Run Locally
 
-1. Install dependencies:
+1. Install dependencies
 
 ```bash
 npm install
 ```
 
-2. Start server:
+2. Set `.env`
+
+3. Start server
 
 ```bash
 npm start
 ```
 
-3. Open in browser:
+4. Open
 
 ```text
 http://localhost:3000
@@ -45,66 +84,99 @@ http://localhost:3000
 ## Project Structure
 
 ```text
-WATCHPARTY/
-  server.js                  # Express + Socket.IO server
-  package.json               # Dependencies and scripts
-  uploads/                   # Uploaded room videos (served statically)
+WatchParty/
+  server.js
+  package.json
   public/
-    watch-party.html         # Watch party UI
-    watch-party.css          # Glassmorphism styling
-    watch-party.js           # Client socket and playback sync logic
-
-  # Existing single-user player files are still in repo:
-  index.html
-  styles.css
-  app.js
+    watch-party.html
+    watch-party.css
+    watch-party.js
 ```
+
+## API Endpoints
+
+- `POST /api/upload/:roomId` (host direct upload)
+- `POST /api/request-upload/:roomId` (viewer request upload)
+- `POST /api/request-action/:roomId` (host approve/reject request)
+- `POST /api/select-video/:roomId` (host sets active playlist video)
+- `POST /api/delete-video/:roomId` (host deletes specific playlist video)
+- `POST /api/clear-upload/:roomId` (host clears current video)
 
 ## Socket Events
 
-- Client -> Server
-  - `join-room`
-  - `host-play`
-  - `host-pause`
-  - `host-seek`
-  - `host-state` (periodic drift correction)
-  - `request-sync`
+Client -> Server:
 
-- Server -> Client
-  - `room-state`
-  - `room-video-changed`
-  - `sync-state`
-  - `room-members`
-  - `host-changed`
+- `join-room`
+- `host-play`
+- `host-pause`
+- `host-seek`
+- `host-state`
+- `request-sync`
 
-## Database Recommendation
+Server -> Client:
 
-For your requirement (watch party + uploaded videos + rooms), use:
+- `room-state`
+- `playlist-updated`
+- `queue-updated`
+- `room-video-changed`
+- `room-video-cleared`
+- `sync-state`
+- `room-members`
+- `host-changed`
 
-1. **PostgreSQL (Recommended for production)**
-   - Store rooms, users, session history, and video metadata.
-   - Strong consistency + reliable relational model.
+## Current Limitations
 
-2. **Redis (Recommended alongside PostgreSQL)**
-   - Keep ephemeral live room state (current time, playing flag, host id).
-   - Fast pub/sub if you scale to multiple server instances.
+- In-memory room state (not persistent across server restart)
+- 1 GB per upload request limit in current Multer config
+- No authentication/authorization yet
+- No database-backed metadata yet
 
-3. **Object Storage for video files**
-   - Use S3 / Cloudflare R2 / Supabase Storage for uploaded videos.
-   - Store only file URL + metadata in PostgreSQL.
+## Future Plans (Roadmap)
 
-### Simple Setup Option
+### 1. Communication Layer
 
-If you want the easiest start before scaling:
+- Real-time text chat per room
+- Message history persistence
+- File/image sharing in chat
+- Reactions and typing indicators
 
-- Use **SQLite** for metadata (single server)
-- Keep Socket.IO room state in memory
-- Save files on local disk (`uploads/`)
+### 2. Video Call Integration
 
-Then migrate to PostgreSQL + Redis + object storage when traffic grows.
+- In-room video/audio call (WebRTC)
+- Host controls for mute/video moderation
+- Grid/pinned participant layout
+- Call quality adaptation
 
-## Important Notes
+### 3. Custom Room System
 
-- Current server keeps room state in memory.
-- Uploaded files are stored on local disk.
-- This is good for MVP/local use, but for production multi-instance deployment, move state/files to shared services.
+- Public/private rooms
+- Room password / invite links
+- Room roles (host, co-host, viewer)
+- Custom room themes, names, and room settings
+- Scheduled rooms and recurring events
+
+### 4. Platform and Scaling
+
+- PostgreSQL for room/playlist/request metadata
+- Redis for distributed real-time room state
+- Multi-instance Socket.IO scale-out
+- Background jobs for blob cleanup and queue expiry
+
+### 5. Security and Productization
+
+- User auth (OAuth/email)
+- Permission checks by role
+- Audit logs for moderation actions
+- Rate limiting and abuse protection
+
+## Recommended Production Architecture
+
+- App: Azure App Service (Node.js)
+- Storage: Azure Blob Storage
+- Metadata DB: PostgreSQL
+- Realtime scale: Redis/Web PubSub strategy
+
+## Notes
+
+- For Azure deployment, use App Service Application Settings instead of relying on `.env` in production.
+- Blob URLs and SAS handling should be hardened before public launch.

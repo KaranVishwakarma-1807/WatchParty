@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const crypto = require("crypto");
 const multer = require("multer");
 const { Server } = require("socket.io");
 const dotenv = require("dotenv");
@@ -55,7 +56,9 @@ function getRoom(roomId) {
     rooms.set(roomId, {
       hostId: null,
       members: new Map(),
-      video: null,
+      playlist: [],
+      pendingRequests: [],
+      currentVideoId: null,
       state: {
         currentTime: 0,
         isPlaying: false,
@@ -84,6 +87,30 @@ function syncPayload(room) {
     isPlaying: room.state.isPlaying,
     sentAt: Date.now(),
   };
+}
+
+function getCurrentVideo(room) {
+  if (!room.currentVideoId) return null;
+  return room.playlist.find((item) => item.id === room.currentVideoId) || null;
+}
+
+function playlistPayload(room) {
+  return room.playlist.map((item) => ({
+    id: item.id,
+    fileName: item.fileName,
+    fileUrl: item.fileUrl,
+    uploadedAt: item.uploadedAt,
+    uploadedByName: item.uploadedByName,
+  }));
+}
+
+function requestQueuePayload(room) {
+  return room.pendingRequests.map((item) => ({
+    id: item.id,
+    fileName: item.fileName,
+    requestedByName: item.requestedByName,
+    requestedAt: item.requestedAt,
+  }));
 }
 
 function ensureAzureReady() {
@@ -132,6 +159,61 @@ async function removeUploadedBlob(blobName) {
   }
 }
 
+function resetPlaybackState(room) {
+  room.state = {
+    currentTime: 0,
+    isPlaying: false,
+    updatedAt: Date.now(),
+  };
+}
+
+function emitPlaylistUpdate(roomId, room) {
+  io.to(roomId).emit("playlist-updated", {
+    playlist: playlistPayload(room),
+    currentVideoId: room.currentVideoId,
+  });
+}
+
+function emitQueueUpdate(roomId, room) {
+  io.to(roomId).emit("queue-updated", {
+    pendingRequests: requestQueuePayload(room),
+  });
+}
+
+async function deleteVideoById(roomId, room, videoId) {
+  const found = room.playlist.find((item) => item.id === videoId);
+  if (!found) {
+    return { ok: false, error: "Video not found in playlist.", status: 404 };
+  }
+
+  await removeUploadedBlob(found.blobName);
+
+  const deletedWasCurrent = room.currentVideoId === found.id;
+  room.playlist = room.playlist.filter((item) => item.id !== found.id);
+
+  if (!room.playlist.length) {
+    room.currentVideoId = null;
+    resetPlaybackState(room);
+    emitPlaylistUpdate(roomId, room);
+    io.to(roomId).emit("room-video-cleared", { state: syncPayload(room) });
+    return { ok: true };
+  }
+
+  if (deletedWasCurrent) {
+    room.currentVideoId = room.playlist[0].id;
+    resetPlaybackState(room);
+    emitPlaylistUpdate(roomId, room);
+    io.to(roomId).emit("room-video-changed", {
+      video: getCurrentVideo(room),
+      state: syncPayload(room),
+    });
+    return { ok: true };
+  }
+
+  emitPlaylistUpdate(roomId, room);
+  return { ok: true };
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -155,8 +237,57 @@ app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
       return res.status(400).json({ error: "Video file is required." });
     }
 
-    if (room.video?.blobName) {
-      await removeUploadedBlob(room.video.blobName);
+    const uploaded = await uploadVideoBufferToAzure({
+      roomId,
+      originalName: req.file.originalname,
+      buffer: req.file.buffer,
+      contentType: req.file.mimetype,
+    });
+
+    const newItem = {
+      id: crypto.randomUUID(),
+      fileName: req.file.originalname,
+      fileUrl: uploaded.fileUrl,
+      blobName: uploaded.blobName,
+      uploadedAt: Date.now(),
+      uploadedByName: room.members.get(socketId) || "Host",
+    };
+
+    room.playlist.push(newItem);
+    room.currentVideoId = newItem.id;
+    resetPlaybackState(room);
+
+    emitPlaylistUpdate(roomId, room);
+    io.to(roomId).emit("room-video-changed", {
+      video: getCurrentVideo(room),
+      state: syncPayload(room),
+    });
+
+    return res.json({ ok: true, video: newItem, playlist: playlistPayload(room) });
+  } catch (error) {
+    console.error("Upload failed:", error.message);
+    return res.status(500).json({ error: `Upload failed: ${error.message}` });
+  }
+});
+
+app.post("/api/request-upload/:roomId", upload.single("video"), async (req, res) => {
+  try {
+    ensureAzureReady();
+
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || !room.members.has(socketId)) {
+      return res.status(403).json({ error: "Join room first before requesting upload." });
+    }
+
+    if (room.hostId === socketId) {
+      return res.status(400).json({ error: "Host should use direct upload." });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Video file is required." });
     }
 
     const uploaded = await uploadVideoBufferToAzure({
@@ -166,28 +297,125 @@ app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
       contentType: req.file.mimetype,
     });
 
-    room.video = {
+    const requestItem = {
+      id: crypto.randomUUID(),
       fileName: req.file.originalname,
       fileUrl: uploaded.fileUrl,
       blobName: uploaded.blobName,
-      uploadedAt: Date.now(),
+      requestedById: socketId,
+      requestedByName: room.members.get(socketId) || "Viewer",
+      requestedAt: Date.now(),
     };
 
-    room.state = {
-      currentTime: 0,
-      isPlaying: false,
-      updatedAt: Date.now(),
-    };
+    room.pendingRequests.push(requestItem);
+    emitQueueUpdate(roomId, room);
 
+    return res.json({ ok: true, requestId: requestItem.id });
+  } catch (error) {
+    console.error("Request upload failed:", error.message);
+    return res.status(500).json({ error: `Request failed: ${error.message}` });
+  }
+});
+
+app.post("/api/request-action/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const requestId = req.body.requestId;
+    const action = String(req.body.action || "").toLowerCase();
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can approve or reject requests." });
+    }
+
+    if (action !== "approve" && action !== "reject") {
+      return res.status(400).json({ error: "Invalid action." });
+    }
+
+    const index = room.pendingRequests.findIndex((item) => item.id === requestId);
+    if (index === -1) {
+      return res.status(404).json({ error: "Request not found." });
+    }
+
+    const requestItem = room.pendingRequests[index];
+    room.pendingRequests.splice(index, 1);
+
+    if (action === "approve") {
+      const newItem = {
+        id: crypto.randomUUID(),
+        fileName: requestItem.fileName,
+        fileUrl: requestItem.fileUrl,
+        blobName: requestItem.blobName,
+        uploadedAt: Date.now(),
+        uploadedByName: requestItem.requestedByName,
+      };
+      room.playlist.push(newItem);
+      emitPlaylistUpdate(roomId, room);
+    } else {
+      await removeUploadedBlob(requestItem.blobName);
+    }
+
+    emitQueueUpdate(roomId, room);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Request action failed:", error.message);
+    return res.status(500).json({ error: "Failed to process request action." });
+  }
+});
+
+app.post("/api/select-video/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const videoId = req.body.videoId;
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can select video." });
+    }
+
+    const found = room.playlist.find((item) => item.id === videoId);
+    if (!found) {
+      return res.status(404).json({ error: "Video not found in playlist." });
+    }
+
+    room.currentVideoId = found.id;
+    resetPlaybackState(room);
+
+    emitPlaylistUpdate(roomId, room);
     io.to(roomId).emit("room-video-changed", {
-      video: room.video,
+      video: found,
       state: syncPayload(room),
     });
 
-    return res.json({ ok: true, video: room.video });
+    return res.json({ ok: true, video: found });
   } catch (error) {
-    console.error("Upload failed:", error.message);
-    return res.status(500).json({ error: `Upload failed: ${error.message}` });
+    console.error("Select video failed:", error.message);
+    return res.status(500).json({ error: "Failed to select video." });
+  }
+});
+
+app.post("/api/delete-video/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const videoId = req.body.videoId;
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can delete videos." });
+    }
+
+    const result = await deleteVideoById(roomId, room, videoId);
+    if (!result.ok) {
+      return res.status(result.status || 500).json({ error: result.error || "Failed to delete video." });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Delete video failed:", error.message);
+    return res.status(500).json({ error: "Failed to delete video." });
   }
 });
 
@@ -201,20 +429,15 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
       return res.status(403).json({ error: "Only the room host can clear uploaded video." });
     }
 
-    if (room.video?.blobName) {
-      await removeUploadedBlob(room.video.blobName);
+    const current = getCurrentVideo(room);
+    if (!current) {
+      return res.json({ ok: true });
     }
 
-    room.video = null;
-    room.state = {
-      currentTime: 0,
-      isPlaying: false,
-      updatedAt: Date.now(),
-    };
-
-    io.to(roomId).emit("room-video-cleared", {
-      state: syncPayload(room),
-    });
+    const result = await deleteVideoById(roomId, room, current.id);
+    if (!result.ok) {
+      return res.status(result.status || 500).json({ error: result.error || "Failed to clear uploaded video." });
+    }
 
     return res.json({ ok: true });
   } catch (error) {
@@ -242,7 +465,10 @@ io.on("connection", (socket) => {
       roomId: normalizedRoomId,
       isHost: room.hostId === socket.id,
       hostId: room.hostId,
-      video: room.video,
+      video: getCurrentVideo(room),
+      playlist: playlistPayload(room),
+      pendingRequests: requestQueuePayload(room),
+      currentVideoId: room.currentVideoId,
       state: syncPayload(room),
       members: getMembersPayload(room),
     });
@@ -326,8 +552,15 @@ io.on("connection", (socket) => {
     }
 
     if (room.members.size === 0) {
-      if (room.video?.blobName) {
-        void removeUploadedBlob(room.video.blobName);
+      for (const item of room.playlist) {
+        if (item.blobName) {
+          void removeUploadedBlob(item.blobName);
+        }
+      }
+      for (const requestItem of room.pendingRequests) {
+        if (requestItem.blobName) {
+          void removeUploadedBlob(requestItem.blobName);
+        }
       }
       rooms.delete(roomId);
       return;
@@ -338,10 +571,10 @@ io.on("connection", (socket) => {
       hostId: room.hostId,
       members: getMembersPayload(room),
     });
+    emitQueueUpdate(roomId, room);
   });
 });
 
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
-

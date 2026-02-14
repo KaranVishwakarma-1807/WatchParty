@@ -56,7 +56,7 @@
         <p id="hostText">Host: -</p>
 
         <div class="upload-box">
-          <label for="uploadInput" class="upload-label">Upload Video (Host)</label>
+          <label for="uploadInput" id="uploadLabel" class="upload-label">Upload Video (Host)</label>
           <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
           <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
             <div class="upload-progress-track">
@@ -64,8 +64,14 @@
             </div>
             <p id="uploadProgressText" class="upload-progress-text">0%</p>
           </div>
-          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Uploaded Video</button>
+          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Current Video</button>
         </div>
+
+        <h3>Playlist</h3>
+        <ul id="playlistList" class="playlist-list"></ul>
+
+        <h3>Request Queue</h3>
+        <ul id="requestQueueList" class="request-queue-list"></ul>
 
         <h3>Members</h3>
         <ul id="memberList"></ul>
@@ -77,4 +83,3 @@
   <script src="watch-party.js"></script>
 </body>
 </html>
-
