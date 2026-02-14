@@ -58,7 +58,7 @@ function getRoom(roomId) {
       members: new Map(),
       playlist: [],
       pendingRequests: [],
-      currentVideoId: null,
+      currentMedia: null,
       state: {
         currentTime: 0,
         isPlaying: false,
@@ -89,9 +89,72 @@ function syncPayload(room) {
   };
 }
 
+function resetPlaybackState(room) {
+  room.state = {
+    currentTime: 0,
+    isPlaying: false,
+    updatedAt: Date.now(),
+  };
+}
+
+function ensureAzureReady() {
+  if (!containerClient) {
+    throw new Error(`Azure Blob Storage is not configured. ${azureConfigError}`.trim());
+  }
+}
+
+function safeFileName(originalName) {
+  return String(originalName || "video")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function buildBlobName(roomId, originalName, scope = "playlist") {
+  return `${roomId}/${scope}/${Date.now()}_${safeFileName(originalName)}`;
+}
+
+function makeVideoIdFromBlobName(blobName) {
+  return `blob_${crypto.createHash("sha1").update(blobName).digest("hex")}`;
+}
+
+function inferFileNameFromBlobName(roomId, blobName, scope = "playlist") {
+  const prefix = `${roomId}/${scope}/`;
+  const nameWithStamp = blobName.startsWith(prefix) ? blobName.slice(prefix.length) : blobName;
+  const underscoreIndex = nameWithStamp.indexOf("_");
+  if (underscoreIndex > -1 && underscoreIndex < nameWithStamp.length - 1) {
+    return nameWithStamp.slice(underscoreIndex + 1);
+  }
+  return nameWithStamp;
+}
+
 function getCurrentVideo(room) {
-  if (!room.currentVideoId) return null;
-  return room.playlist.find((item) => item.id === room.currentVideoId) || null;
+  if (!room.currentMedia || room.currentMedia.type !== "blob") return null;
+  return room.playlist.find((item) => item.id === room.currentMedia.videoId) || null;
+}
+
+function getCurrentMediaPayload(room) {
+  if (!room.currentMedia) return null;
+
+  if (room.currentMedia.type === "youtube") {
+    return {
+      type: "youtube",
+      youtubeId: room.currentMedia.youtubeId,
+      url: room.currentMedia.url,
+      title: room.currentMedia.title,
+    };
+  }
+
+  const video = getCurrentVideo(room);
+  if (!video) return null;
+
+  return {
+    type: "blob",
+    id: video.id,
+    fileName: video.fileName,
+    fileUrl: video.fileUrl,
+    uploadedByName: video.uploadedByName,
+    uploadedAt: video.uploadedAt,
+  };
 }
 
 function playlistPayload(room) {
@@ -113,27 +176,37 @@ function requestQueuePayload(room) {
   }));
 }
 
-function ensureAzureReady() {
-  if (!containerClient) {
-    throw new Error(`Azure Blob Storage is not configured. ${azureConfigError}`.trim());
-  }
+function emitPlaylistUpdate(roomId, room) {
+  io.to(roomId).emit("playlist-updated", {
+    playlist: playlistPayload(room),
+    currentVideoId: room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null,
+  });
 }
 
-function safeFileName(originalName) {
-  return String(originalName || "video")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_");
+function emitQueueUpdate(roomId, room) {
+  io.to(roomId).emit("queue-updated", {
+    pendingRequests: requestQueuePayload(room),
+  });
 }
 
-function buildBlobName(roomId, originalName) {
-  return `${roomId}/${Date.now()}_${safeFileName(originalName)}`;
+function emitMediaChanged(roomId, room) {
+  io.to(roomId).emit("room-media-changed", {
+    media: getCurrentMediaPayload(room),
+    state: syncPayload(room),
+  });
 }
 
-async function uploadVideoBufferToAzure({ roomId, originalName, buffer, contentType }) {
+function emitMediaCleared(roomId, room) {
+  io.to(roomId).emit("room-media-cleared", {
+    state: syncPayload(room),
+  });
+}
+
+async function uploadVideoBufferToAzure({ roomId, originalName, buffer, contentType, scope = "playlist" }) {
   ensureAzureReady();
   await containerClient.createIfNotExists();
 
-  const blobName = buildBlobName(roomId, originalName);
+  const blobName = buildBlobName(roomId, originalName, scope);
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
   await blockBlobClient.uploadData(buffer, {
@@ -159,25 +232,25 @@ async function removeUploadedBlob(blobName) {
   }
 }
 
+async function moveRequestBlobToPlaylist(roomId, requestItem) {
+  const sourceClient = containerClient.getBlockBlobClient(requestItem.blobName);
+  const newBlobName = buildBlobName(roomId, requestItem.fileName, "playlist");
+  const targetClient = containerClient.getBlockBlobClient(newBlobName);
 
-function makeVideoIdFromBlobName(blobName) {
-  return `blob_${crypto.createHash("sha1").update(blobName).digest("hex")}`;
-}
+  const poller = await targetClient.beginCopyFromURL(sourceClient.url);
+  await poller.pollUntilDone();
+  await sourceClient.deleteIfExists();
 
-function inferFileNameFromBlobName(roomId, blobName) {
-  const prefix = `${roomId}/`;
-  const nameWithStamp = blobName.startsWith(prefix) ? blobName.slice(prefix.length) : blobName;
-  const underscoreIndex = nameWithStamp.indexOf("_");
-  if (underscoreIndex > -1 && underscoreIndex < nameWithStamp.length - 1) {
-    return nameWithStamp.slice(underscoreIndex + 1);
-  }
-  return nameWithStamp;
+  return {
+    blobName: newBlobName,
+    fileUrl: targetClient.url,
+  };
 }
 
 async function syncRoomPlaylistFromBlob(roomId, room) {
   if (!containerClient) return;
 
-  const prefix = `${roomId}/`;
+  const prefix = `${roomId}/playlist/`;
   const items = [];
 
   for await (const blob of containerClient.listBlobsFlat({ prefix })) {
@@ -190,7 +263,7 @@ async function syncRoomPlaylistFromBlob(roomId, room) {
 
     items.push({
       id: makeVideoIdFromBlobName(blob.name),
-      fileName: inferFileNameFromBlobName(roomId, blob.name),
+      fileName: inferFileNameFromBlobName(roomId, blob.name, "playlist"),
       fileUrl,
       blobName: blob.name,
       uploadedAt,
@@ -203,30 +276,44 @@ async function syncRoomPlaylistFromBlob(roomId, room) {
   items.sort((a, b) => a.uploadedAt - b.uploadedAt);
   room.playlist = items;
 
-  const hasCurrent = room.playlist.some((item) => item.id === room.currentVideoId);
-  if (!hasCurrent) {
-    room.currentVideoId = room.playlist[0].id;
+  const currentBlobId = room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null;
+  const hasCurrent = currentBlobId && room.playlist.some((item) => item.id === currentBlobId);
+  if (!hasCurrent && !room.currentMedia) {
+    room.currentMedia = {
+      type: "blob",
+      videoId: room.playlist[0].id,
+    };
     resetPlaybackState(room);
   }
-}function resetPlaybackState(room) {
-  room.state = {
-    currentTime: 0,
-    isPlaying: false,
-    updatedAt: Date.now(),
-  };
 }
 
-function emitPlaylistUpdate(roomId, room) {
-  io.to(roomId).emit("playlist-updated", {
-    playlist: playlistPayload(room),
-    currentVideoId: room.currentVideoId,
-  });
-}
+function parseYouTubeVideoId(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
 
-function emitQueueUpdate(roomId, room) {
-  io.to(roomId).emit("queue-updated", {
-    pendingRequests: requestQueuePayload(room),
-  });
+    if (host === "youtu.be") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0];
+      return id || null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        const id = parsed.searchParams.get("v");
+        return id || null;
+      }
+
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const type = parts[0];
+      if (type === "shorts" || type === "embed") {
+        return parts[1] || null;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function deleteVideoById(roomId, room, videoId) {
@@ -237,25 +324,30 @@ async function deleteVideoById(roomId, room, videoId) {
 
   await removeUploadedBlob(found.blobName);
 
-  const deletedWasCurrent = room.currentVideoId === found.id;
+  const deletedWasCurrentBlob = room.currentMedia?.type === "blob" && room.currentMedia.videoId === found.id;
   room.playlist = room.playlist.filter((item) => item.id !== found.id);
 
   if (!room.playlist.length) {
-    room.currentVideoId = null;
-    resetPlaybackState(room);
+    if (deletedWasCurrentBlob) {
+      room.currentMedia = null;
+      resetPlaybackState(room);
+      emitPlaylistUpdate(roomId, room);
+      emitMediaCleared(roomId, room);
+      return { ok: true };
+    }
+
     emitPlaylistUpdate(roomId, room);
-    io.to(roomId).emit("room-video-cleared", { state: syncPayload(room) });
     return { ok: true };
   }
 
-  if (deletedWasCurrent) {
-    room.currentVideoId = room.playlist[0].id;
+  if (deletedWasCurrentBlob) {
+    room.currentMedia = {
+      type: "blob",
+      videoId: room.playlist[0].id,
+    };
     resetPlaybackState(room);
     emitPlaylistUpdate(roomId, room);
-    io.to(roomId).emit("room-video-changed", {
-      video: getCurrentVideo(room),
-      state: syncPayload(room),
-    });
+    emitMediaChanged(roomId, room);
     return { ok: true };
   }
 
@@ -291,10 +383,11 @@ app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
       originalName: req.file.originalname,
       buffer: req.file.buffer,
       contentType: req.file.mimetype,
+      scope: "playlist",
     });
 
     const newItem = {
-      id: crypto.randomUUID(),
+      id: makeVideoIdFromBlobName(uploaded.blobName),
       fileName: req.file.originalname,
       fileUrl: uploaded.fileUrl,
       blobName: uploaded.blobName,
@@ -303,19 +396,53 @@ app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
     };
 
     room.playlist.push(newItem);
-    room.currentVideoId = newItem.id;
+    room.currentMedia = {
+      type: "blob",
+      videoId: newItem.id,
+    };
     resetPlaybackState(room);
 
     emitPlaylistUpdate(roomId, room);
-    io.to(roomId).emit("room-video-changed", {
-      video: getCurrentVideo(room),
-      state: syncPayload(room),
-    });
+    emitMediaChanged(roomId, room);
 
     return res.json({ ok: true, video: newItem, playlist: playlistPayload(room) });
   } catch (error) {
     console.error("Upload failed:", error.message);
     return res.status(500).json({ error: `Upload failed: ${error.message}` });
+  }
+});
+
+app.post("/api/set-youtube/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const url = String(req.body.url || "").trim();
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can set YouTube media." });
+    }
+
+    const youtubeId = parseYouTubeVideoId(url);
+    if (!youtubeId) {
+      return res.status(400).json({ error: "Invalid YouTube URL." });
+    }
+
+    room.currentMedia = {
+      type: "youtube",
+      youtubeId,
+      url,
+      title: `YouTube: ${youtubeId}`,
+    };
+    resetPlaybackState(room);
+
+    emitPlaylistUpdate(roomId, room);
+    emitMediaChanged(roomId, room);
+
+    return res.json({ ok: true, media: getCurrentMediaPayload(room) });
+  } catch (error) {
+    console.error("Set YouTube failed:", error.message);
+    return res.status(500).json({ error: "Failed to set YouTube media." });
   }
 });
 
@@ -344,6 +471,7 @@ app.post("/api/request-upload/:roomId", upload.single("video"), async (req, res)
       originalName: req.file.originalname,
       buffer: req.file.buffer,
       contentType: req.file.mimetype,
+      scope: "requests",
     });
 
     const requestItem = {
@@ -391,11 +519,12 @@ app.post("/api/request-action/:roomId", async (req, res) => {
     room.pendingRequests.splice(index, 1);
 
     if (action === "approve") {
+      const moved = await moveRequestBlobToPlaylist(roomId, requestItem);
       const newItem = {
-        id: crypto.randomUUID(),
+        id: makeVideoIdFromBlobName(moved.blobName),
         fileName: requestItem.fileName,
-        fileUrl: requestItem.fileUrl,
-        blobName: requestItem.blobName,
+        fileUrl: moved.fileUrl,
+        blobName: moved.blobName,
         uploadedAt: Date.now(),
         uploadedByName: requestItem.requestedByName,
       };
@@ -429,16 +558,16 @@ app.post("/api/select-video/:roomId", async (req, res) => {
       return res.status(404).json({ error: "Video not found in playlist." });
     }
 
-    room.currentVideoId = found.id;
+    room.currentMedia = {
+      type: "blob",
+      videoId: found.id,
+    };
     resetPlaybackState(room);
 
     emitPlaylistUpdate(roomId, room);
-    io.to(roomId).emit("room-video-changed", {
-      video: found,
-      state: syncPayload(room),
-    });
+    emitMediaChanged(roomId, room);
 
-    return res.json({ ok: true, video: found });
+    return res.json({ ok: true, media: getCurrentMediaPayload(room) });
   } catch (error) {
     console.error("Select video failed:", error.message);
     return res.status(500).json({ error: "Failed to select video." });
@@ -475,15 +604,22 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
     const room = rooms.get(roomId);
 
     if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can clear uploaded video." });
+      return res.status(403).json({ error: "Only the room host can clear current media." });
     }
 
-    const current = getCurrentVideo(room);
-    if (!current) {
+    if (!room.currentMedia) {
       return res.json({ ok: true });
     }
 
-    const result = await deleteVideoById(roomId, room, current.id);
+    if (room.currentMedia.type === "youtube") {
+      room.currentMedia = null;
+      resetPlaybackState(room);
+      emitPlaylistUpdate(roomId, room);
+      emitMediaCleared(roomId, room);
+      return res.json({ ok: true });
+    }
+
+    const result = await deleteVideoById(roomId, room, room.currentMedia.videoId);
     if (!result.ok) {
       return res.status(result.status || 500).json({ error: result.error || "Failed to clear uploaded video." });
     }
@@ -500,6 +636,7 @@ io.on("connection", (socket) => {
     const normalizedRoomId = normalizeRoomId(roomId);
     const safeName = String(name || "Guest").trim().slice(0, 32) || "Guest";
     const room = getRoom(normalizedRoomId);
+
     try {
       await syncRoomPlaylistFromBlob(normalizedRoomId, room);
     } catch (error) {
@@ -519,10 +656,10 @@ io.on("connection", (socket) => {
       roomId: normalizedRoomId,
       isHost: room.hostId === socket.id,
       hostId: room.hostId,
-      video: getCurrentVideo(room),
+      media: getCurrentMediaPayload(room),
       playlist: playlistPayload(room),
       pendingRequests: requestQueuePayload(room),
-      currentVideoId: room.currentVideoId,
+      currentVideoId: room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null,
       state: syncPayload(room),
       members: getMembersPayload(room),
     });
@@ -632,5 +769,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
-
-

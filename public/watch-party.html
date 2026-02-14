@@ -32,7 +32,10 @@
     <section class="layout">
       <article class="glass player-card">
         <video id="videoPlayer" playsinline></video>
-        <p id="videoTitle" class="video-title">No video uploaded yet.</p>
+        <div id="youtubeContainer" class="youtube-container hidden">
+          <div id="youtubePlayer"></div>
+        </div>
+        <p id="videoTitle" class="video-title">No media selected yet.</p>
 
         <section class="controls">
           <button id="playPauseBtn" type="button">Play</button>
@@ -56,15 +59,21 @@
         <p id="hostText">Host: -</p>
 
         <div class="upload-box">
-          <label for="uploadInput" id="uploadLabel" class="upload-label">Upload Video (Host)</label>
+          <label for="uploadInput" id="uploadLabel" class="upload-label">Upload Video (Host Direct)</label>
           <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
+
+          <div class="youtube-box">
+            <input id="youtubeUrlInput" type="text" placeholder="Paste YouTube URL (Host)" />
+            <button id="setYoutubeBtn" type="button">Set YouTube</button>
+          </div>
+
           <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
             <div class="upload-progress-track">
               <div id="uploadProgressFill" class="upload-progress-fill"></div>
             </div>
             <p id="uploadProgressText" class="upload-progress-text">0%</p>
           </div>
-          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Current Video</button>
+          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Current Media</button>
         </div>
 
         <h3>Playlist</h3>
@@ -79,6 +88,7 @@
     </section>
   </main>
 
+  <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="watch-party.js"></script>
 </body>

@@ -15,8 +15,11 @@ const clearUploadBtn = document.getElementById("clearUploadBtn");
 const uploadProgressWrap = document.getElementById("uploadProgressWrap");
 const uploadProgressFill = document.getElementById("uploadProgressFill");
 const uploadProgressText = document.getElementById("uploadProgressText");
+const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+const setYoutubeBtn = document.getElementById("setYoutubeBtn");
 
 const video = document.getElementById("videoPlayer");
+const youtubeContainer = document.getElementById("youtubeContainer");
 const videoTitle = document.getElementById("videoTitle");
 const playPauseBtn = document.getElementById("playPauseBtn");
 const muteBtn = document.getElementById("muteBtn");
@@ -28,15 +31,18 @@ const timeText = document.getElementById("timeText");
 let currentRoomId = "";
 let currentHostId = "";
 let currentVideoId = null;
+let currentMedia = null;
 let playlist = [];
 let pendingRequests = [];
 let selfId = "";
 let isHost = false;
 let applyingRemote = false;
 let lastHostStateSentAt = 0;
+let youtubePlayer = null;
+let youtubeReady = false;
 
 function formatTime(seconds) {
-  if (!Number.isFinite(seconds)) return "00:00";
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
@@ -46,6 +52,71 @@ function shorten(name, maxLen = 42) {
   if (!name) return "Untitled";
   if (name.length <= maxLen) return name;
   return `${name.slice(0, maxLen - 3)}...`;
+}
+
+function isYoutubeMode() {
+  return currentMedia?.type === "youtube";
+}
+
+function isBlobMode() {
+  return currentMedia?.type === "blob";
+}
+
+function updateActivePlayerUI() {
+  if (isYoutubeMode()) {
+    video.classList.add("hidden");
+    youtubeContainer.classList.remove("hidden");
+  } else {
+    youtubeContainer.classList.add("hidden");
+    video.classList.remove("hidden");
+  }
+}
+
+function getCurrentTimeSec() {
+  if (isYoutubeMode()) {
+    if (youtubePlayer && youtubeReady && typeof youtubePlayer.getCurrentTime === "function") {
+      return Number(youtubePlayer.getCurrentTime()) || 0;
+    }
+    return 0;
+  }
+  return Number(video.currentTime) || 0;
+}
+
+function getDurationSec() {
+  if (isYoutubeMode()) {
+    if (youtubePlayer && youtubeReady && typeof youtubePlayer.getDuration === "function") {
+      return Number(youtubePlayer.getDuration()) || 0;
+    }
+    return 0;
+  }
+  return Number(video.duration) || 0;
+}
+
+function isPlayingNow() {
+  if (isYoutubeMode()) {
+    if (!youtubePlayer || !youtubeReady || typeof youtubePlayer.getPlayerState !== "function") return false;
+    return youtubePlayer.getPlayerState() === 1;
+  }
+  return !video.paused;
+}
+
+function renderTimeline() {
+  const duration = getDurationSec();
+  const current = getCurrentTimeSec();
+  if (duration > 0) {
+    seekRange.value = (current / duration) * 100;
+  } else {
+    seekRange.value = 0;
+  }
+  timeText.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+}
+
+function emitHostState(eventName) {
+  if (!isHost || !currentMedia || applyingRemote) return;
+  socket.emit(eventName, {
+    time: getCurrentTimeSec(),
+    isPlaying: isPlayingNow(),
+  });
 }
 
 function renderPlaylist() {
@@ -61,7 +132,8 @@ function renderPlaylist() {
 
   playlist.forEach((item) => {
     const li = document.createElement("li");
-    li.className = `playlist-item${item.id === currentVideoId ? " active" : ""}`;
+    const isActiveBlob = isBlobMode() && item.id === currentVideoId;
+    li.className = `playlist-item${isActiveBlob ? " active" : ""}`;
 
     const title = document.createElement("span");
     title.className = "playlist-title";
@@ -71,7 +143,7 @@ function renderPlaylist() {
 
     if (isHost) {
       title.addEventListener("click", async () => {
-        if (item.id === currentVideoId) return;
+        if (item.id === currentVideoId && isBlobMode()) return;
         try {
           const response = await fetch(`/api/select-video/${currentRoomId}`, {
             method: "POST",
@@ -86,7 +158,7 @@ function renderPlaylist() {
             statusText.textContent = result.error || "Failed to select video.";
             return;
           }
-          statusText.textContent = `Selected: ${result.video.fileName}`;
+          statusText.textContent = `Selected: ${item.fileName}`;
         } catch {
           statusText.textContent = "Failed to select video.";
         }
@@ -196,11 +268,15 @@ function updateRoleUI() {
   roleText.textContent = `Role: ${isHost ? "Host" : "Viewer"}`;
   uploadLabel.textContent = isHost ? "Upload Video (Host Direct)" : "Request Video Add";
   clearUploadBtn.disabled = !isHost;
+  setYoutubeBtn.disabled = !isHost;
+  youtubeUrlInput.disabled = !isHost;
 
   if (isHost) {
     clearUploadBtn.classList.remove("disabled");
+    setYoutubeBtn.classList.remove("disabled");
   } else {
     clearUploadBtn.classList.add("disabled");
+    setYoutubeBtn.classList.add("disabled");
   }
 
   renderPlaylist();
@@ -214,48 +290,6 @@ function updateMembers(members) {
     li.textContent = member.id === currentHostId ? `${member.name} (Host)` : member.name;
     memberList.appendChild(li);
   });
-}
-
-function applyVideo(videoInfo) {
-  if (!videoInfo) return;
-  currentVideoId = videoInfo.id || currentVideoId;
-  video.src = videoInfo.fileUrl;
-  videoTitle.textContent = `Now playing: ${videoInfo.fileName}`;
-  renderPlaylist();
-}
-
-function clearVideoFromUI() {
-  currentVideoId = null;
-  video.pause();
-  video.removeAttribute("src");
-  video.load();
-  videoTitle.textContent = "No video uploaded yet.";
-  timeText.textContent = "00:00 / 00:00";
-  seekRange.value = 0;
-  playPauseBtn.textContent = "Play";
-  renderPlaylist();
-}
-
-async function applyRemoteState(payload) {
-  if (!video.src) return;
-  applyingRemote = true;
-
-  const targetTime = Number(payload.currentTime) || 0;
-  if (Math.abs(video.currentTime - targetTime) > 0.8) {
-    video.currentTime = targetTime;
-  }
-
-  try {
-    if (payload.isPlaying) {
-      await video.play();
-    } else {
-      video.pause();
-    }
-  } catch {
-    // Browser may block autoplay until interaction.
-  } finally {
-    applyingRemote = false;
-  }
 }
 
 function setUploadProgress(percent, text) {
@@ -273,9 +307,163 @@ function resetUploadProgress(delayMs = 1200) {
   }, delayMs);
 }
 
-function emitHostState(eventName) {
-  if (!isHost || !video.src || applyingRemote) return;
-  socket.emit(eventName, { time: video.currentTime, isPlaying: !video.paused });
+function clearMediaFromUI() {
+  currentMedia = null;
+  currentVideoId = null;
+
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+
+  if (youtubePlayer && youtubeReady && typeof youtubePlayer.stopVideo === "function") {
+    youtubePlayer.stopVideo();
+  }
+
+  updateActivePlayerUI();
+  videoTitle.textContent = "No media selected yet.";
+  playPauseBtn.textContent = "Play";
+  seekRange.value = 0;
+  timeText.textContent = "00:00 / 00:00";
+  renderPlaylist();
+}
+
+function ensureYouTubePlayer(videoId) {
+  return new Promise((resolve, reject) => {
+    const finalize = () => {
+      if (!youtubePlayer || !youtubeReady) {
+        reject(new Error("YouTube player is not ready."));
+        return;
+      }
+
+      if (typeof youtubePlayer.loadVideoById === "function") {
+        youtubePlayer.loadVideoById(videoId);
+      }
+      resolve();
+    };
+
+    const wait = () => {
+      if (window.YT && typeof window.YT.Player === "function") {
+        if (!youtubePlayer) {
+          youtubePlayer = new window.YT.Player("youtubePlayer", {
+            videoId,
+            playerVars: {
+              rel: 0,
+              modestbranding: 1,
+              playsinline: 1,
+            },
+            events: {
+              onReady: () => {
+                youtubeReady = true;
+                if (typeof youtubePlayer.setVolume === "function") {
+                  youtubePlayer.setVolume(Math.round(Number(volumeRange.value) * 100));
+                }
+                resolve();
+              },
+              onStateChange: (event) => {
+                if (applyingRemote) return;
+
+                if (event.data === 1) {
+                  playPauseBtn.textContent = "Pause";
+                  emitHostState("host-play");
+                }
+
+                if (event.data === 2) {
+                  playPauseBtn.textContent = "Play";
+                  emitHostState("host-pause");
+                }
+              },
+            },
+          });
+        } else if (!youtubeReady) {
+          setTimeout(wait, 120);
+        } else {
+          finalize();
+        }
+      } else {
+        setTimeout(wait, 120);
+      }
+    };
+
+    wait();
+  });
+}
+
+async function applyMedia(media) {
+  currentMedia = media || null;
+
+  if (!currentMedia) {
+    clearMediaFromUI();
+    return;
+  }
+
+  if (currentMedia.type === "blob") {
+    currentVideoId = currentMedia.id || null;
+    video.src = currentMedia.fileUrl;
+    videoTitle.textContent = `Now playing: ${currentMedia.fileName}`;
+    playPauseBtn.textContent = "Play";
+    updateActivePlayerUI();
+    renderPlaylist();
+    return;
+  }
+
+  if (currentMedia.type === "youtube") {
+    currentVideoId = null;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+
+    updateActivePlayerUI();
+    videoTitle.textContent = `Now playing: ${currentMedia.title || "YouTube Video"}`;
+    renderPlaylist();
+
+    try {
+      await ensureYouTubePlayer(currentMedia.youtubeId);
+    } catch {
+      statusText.textContent = "YouTube player failed to initialize.";
+    }
+  }
+}
+
+async function applyRemoteState(payload) {
+  if (!currentMedia) return;
+  applyingRemote = true;
+
+  const targetTime = Number(payload.currentTime) || 0;
+
+  try {
+    if (isYoutubeMode()) {
+      if (youtubePlayer && youtubeReady) {
+        if (typeof youtubePlayer.seekTo === "function") {
+          const delta = Math.abs((youtubePlayer.getCurrentTime?.() || 0) - targetTime);
+          if (delta > 1) youtubePlayer.seekTo(targetTime, true);
+        }
+
+        if (payload.isPlaying) {
+          youtubePlayer.playVideo?.();
+          playPauseBtn.textContent = "Pause";
+        } else {
+          youtubePlayer.pauseVideo?.();
+          playPauseBtn.textContent = "Play";
+        }
+      }
+    } else {
+      if (Math.abs(video.currentTime - targetTime) > 0.8) {
+        video.currentTime = targetTime;
+      }
+
+      if (payload.isPlaying) {
+        await video.play();
+        playPauseBtn.textContent = "Pause";
+      } else {
+        video.pause();
+        playPauseBtn.textContent = "Play";
+      }
+    }
+  } catch {
+    // Browser policy or transient player issue.
+  } finally {
+    applyingRemote = false;
+  }
 }
 
 joinBtn.addEventListener("click", () => {
@@ -288,6 +476,33 @@ joinBtn.addEventListener("click", () => {
 
   socket.emit("join-room", { roomId, name });
   statusText.textContent = "Connecting to room...";
+});
+
+setYoutubeBtn.addEventListener("click", async () => {
+  if (!isHost || !currentRoomId) return;
+  const url = youtubeUrlInput.value.trim();
+  if (!url) {
+    statusText.textContent = "Paste a YouTube URL.";
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/set-youtube/${currentRoomId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ socketId: selfId, url }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      statusText.textContent = result.error || "Failed to set YouTube.";
+      return;
+    }
+    statusText.textContent = "YouTube media set for room.";
+  } catch {
+    statusText.textContent = "Failed to set YouTube media.";
+  }
 });
 
 uploadInput.addEventListener("change", async (event) => {
@@ -306,7 +521,7 @@ uploadInput.addEventListener("change", async (event) => {
   statusText.textContent = isHost ? `Uploading ${file.name}...` : `Submitting request for ${file.name}...`;
 
   try {
-    const result = await new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", endpoint);
 
@@ -336,7 +551,7 @@ uploadInput.addEventListener("change", async (event) => {
     });
 
     setUploadProgress(100, isHost ? "Upload complete" : "Request submitted");
-    statusText.textContent = isHost ? `Uploaded: ${result.video.fileName}` : "Request submitted to host.";
+    statusText.textContent = isHost ? `Uploaded: ${file.name}` : "Request submitted to host.";
     resetUploadProgress();
   } catch (error) {
     statusText.textContent = error.message || "Upload failed.";
@@ -360,17 +575,28 @@ clearUploadBtn.addEventListener("click", async () => {
     });
     const result = await response.json();
     if (!response.ok) {
-      statusText.textContent = result.error || "Failed to clear current video.";
+      statusText.textContent = result.error || "Failed to clear current media.";
       return;
     }
-    statusText.textContent = "Current video cleared.";
+    statusText.textContent = "Current media cleared.";
   } catch {
-    statusText.textContent = "Failed to clear current video.";
+    statusText.textContent = "Failed to clear current media.";
   }
 });
 
 playPauseBtn.addEventListener("click", async () => {
-  if (!video.src || !isHost) return;
+  if (!currentMedia || !isHost) return;
+
+  if (isYoutubeMode()) {
+    if (!youtubePlayer || !youtubeReady) return;
+    if (isPlayingNow()) {
+      youtubePlayer.pauseVideo?.();
+    } else {
+      youtubePlayer.playVideo?.();
+    }
+    return;
+  }
+
   if (video.paused) {
     await video.play();
   } else {
@@ -379,62 +605,108 @@ playPauseBtn.addEventListener("click", async () => {
 });
 
 muteBtn.addEventListener("click", () => {
+  if (isYoutubeMode()) {
+    if (!youtubePlayer || !youtubeReady) return;
+    const muted = youtubePlayer.isMuted?.();
+    if (muted) {
+      youtubePlayer.unMute?.();
+      muteBtn.textContent = "Mute";
+    } else {
+      youtubePlayer.mute?.();
+      muteBtn.textContent = "Unmute";
+    }
+    return;
+  }
+
   video.muted = !video.muted;
   muteBtn.textContent = video.muted ? "Unmute" : "Mute";
 });
 
 fullscreenBtn.addEventListener("click", async () => {
-  if (!video.src) return;
+  if (!currentMedia) return;
   if (document.fullscreenElement) {
     await document.exitFullscreen();
   } else {
-    await video.requestFullscreen();
+    const target = isYoutubeMode() ? youtubeContainer : video;
+    await target.requestFullscreen();
   }
 });
 
 volumeRange.addEventListener("input", () => {
-  video.volume = Number(volumeRange.value);
+  const value = Number(volumeRange.value);
+
+  if (isYoutubeMode()) {
+    if (!youtubePlayer || !youtubeReady) return;
+    youtubePlayer.setVolume?.(Math.round(value * 100));
+    return;
+  }
+
+  video.volume = value;
 });
 
 seekRange.addEventListener("input", () => {
-  if (!video.duration) return;
-  const target = (Number(seekRange.value) / 100) * video.duration;
-  video.currentTime = target;
+  if (!currentMedia) return;
+  const duration = getDurationSec();
+  if (!duration) return;
+  const target = (Number(seekRange.value) / 100) * duration;
+
+  if (isYoutubeMode()) {
+    youtubePlayer.seekTo?.(target, true);
+  } else {
+    video.currentTime = target;
+  }
+
+  if (isHost) {
+    emitHostState("host-seek");
+  }
 });
 
 video.addEventListener("timeupdate", () => {
-  if (video.duration) {
-    const progress = (video.currentTime / video.duration) * 100;
-    seekRange.value = progress;
-  }
-  timeText.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+  if (!isBlobMode()) return;
+  renderTimeline();
 
   const now = Date.now();
   if (isHost && !video.paused && now - lastHostStateSentAt > 2000) {
-    socket.emit("host-state", { time: video.currentTime, isPlaying: true });
+    socket.emit("host-state", { time: getCurrentTimeSec(), isPlaying: true });
     lastHostStateSentAt = now;
   }
 });
 
 video.addEventListener("play", () => {
+  if (!isBlobMode()) return;
   playPauseBtn.textContent = "Pause";
   emitHostState("host-play");
 });
 
 video.addEventListener("pause", () => {
+  if (!isBlobMode()) return;
   playPauseBtn.textContent = "Play";
   emitHostState("host-pause");
 });
 
 video.addEventListener("seeked", () => {
+  if (!isBlobMode()) return;
   emitHostState("host-seek");
 });
+
+setInterval(() => {
+  if (!currentMedia) return;
+  renderTimeline();
+
+  if (isHost && isPlayingNow()) {
+    const now = Date.now();
+    if (now - lastHostStateSentAt > 2000) {
+      socket.emit("host-state", { time: getCurrentTimeSec(), isPlaying: true });
+      lastHostStateSentAt = now;
+    }
+  }
+}, 500);
 
 socket.on("connect", () => {
   selfId = socket.id;
 });
 
-socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, video: roomVideo, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
+socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, media, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
   currentRoomId = roomId;
   isHost = hostRole;
   currentHostId = hostId;
@@ -449,11 +721,11 @@ socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, video: roomVi
   hostText.textContent = `Host: ${hostName}`;
   statusText.textContent = `Joined room: ${roomId}`;
 
-  if (roomVideo) {
-    applyVideo(roomVideo);
+  if (media) {
+    await applyMedia(media);
     await applyRemoteState(state);
   } else {
-    clearVideoFromUI();
+    clearMediaFromUI();
   }
 });
 
@@ -468,13 +740,17 @@ socket.on("queue-updated", ({ pendingRequests: queue }) => {
   renderRequestQueue();
 });
 
-socket.on("room-video-changed", async ({ video: roomVideo, state }) => {
-  applyVideo(roomVideo);
+socket.on("room-media-changed", async ({ media, state }) => {
+  if (!media) {
+    clearMediaFromUI();
+    return;
+  }
+  await applyMedia(media);
   await applyRemoteState(state);
 });
 
-socket.on("room-video-cleared", () => {
-  clearVideoFromUI();
+socket.on("room-media-cleared", () => {
+  clearMediaFromUI();
 });
 
 socket.on("room-members", ({ hostId, members }) => {
