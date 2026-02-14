@@ -159,7 +159,56 @@ async function removeUploadedBlob(blobName) {
   }
 }
 
-function resetPlaybackState(room) {
+
+function makeVideoIdFromBlobName(blobName) {
+  return `blob_${crypto.createHash("sha1").update(blobName).digest("hex")}`;
+}
+
+function inferFileNameFromBlobName(roomId, blobName) {
+  const prefix = `${roomId}/`;
+  const nameWithStamp = blobName.startsWith(prefix) ? blobName.slice(prefix.length) : blobName;
+  const underscoreIndex = nameWithStamp.indexOf("_");
+  if (underscoreIndex > -1 && underscoreIndex < nameWithStamp.length - 1) {
+    return nameWithStamp.slice(underscoreIndex + 1);
+  }
+  return nameWithStamp;
+}
+
+async function syncRoomPlaylistFromBlob(roomId, room) {
+  if (!containerClient) return;
+
+  const prefix = `${roomId}/`;
+  const items = [];
+
+  for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+    if (!blob.name || blob.name.endsWith("/")) continue;
+
+    const fileUrl = containerClient.getBlockBlobClient(blob.name).url;
+    const uploadedAt = blob.properties.lastModified
+      ? new Date(blob.properties.lastModified).getTime()
+      : Date.now();
+
+    items.push({
+      id: makeVideoIdFromBlobName(blob.name),
+      fileName: inferFileNameFromBlobName(roomId, blob.name),
+      fileUrl,
+      blobName: blob.name,
+      uploadedAt,
+      uploadedByName: "Blob Upload",
+    });
+  }
+
+  if (!items.length) return;
+
+  items.sort((a, b) => a.uploadedAt - b.uploadedAt);
+  room.playlist = items;
+
+  const hasCurrent = room.playlist.some((item) => item.id === room.currentVideoId);
+  if (!hasCurrent) {
+    room.currentVideoId = room.playlist[0].id;
+    resetPlaybackState(room);
+  }
+}function resetPlaybackState(room) {
   room.state = {
     currentTime: 0,
     isPlaying: false,
@@ -447,10 +496,15 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("join-room", ({ roomId, name }) => {
+  socket.on("join-room", async ({ roomId, name }) => {
     const normalizedRoomId = normalizeRoomId(roomId);
     const safeName = String(name || "Guest").trim().slice(0, 32) || "Guest";
     const room = getRoom(normalizedRoomId);
+    try {
+      await syncRoomPlaylistFromBlob(normalizedRoomId, room);
+    } catch (error) {
+      console.error("Blob sync on join failed:", error.message);
+    }
 
     socket.join(normalizedRoomId);
     socket.data.roomId = normalizedRoomId;
@@ -578,3 +632,5 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
