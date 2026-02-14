@@ -1,5 +1,5 @@
 {
-  "name": "gameportal-watch-party",
+  "name": "watch-party",
   "version": "1.0.0",
   "description": "Watch party app with synchronized playback using Socket.IO",
   "main": "server.js",
