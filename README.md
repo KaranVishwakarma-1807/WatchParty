@@ -1,59 +1,49 @@
-# WatchParty v1
+# WatchParty
 
-A real-time watch-party web app where a host and friends watch synchronized media together in a room.
+A real-time watch-party web app where friends join a shared room and watch media in sync.
 
-## What This App Does
+## Current Features
 
-WatchParty lets users join a shared room and watch content in sync. The host controls playback for everyone. Media can come from Azure Blob uploads or a YouTube link, and all viewers stay aligned through Socket.IO events.
+### Real-time Watch Rooms
+- Join with `roomId` and display name.
+- First member becomes host automatically.
+- Host playback is synchronized for all viewers via Socket.IO.
+- Host handover occurs automatically on disconnect.
 
-## Core Features
+### Roles and Permissions
+- Roles: `host`, `co-host`, `viewer`.
+- Host can promote/demote members to co-host.
+- Co-host can:
+  - Approve/reject viewer upload requests.
+  - Manage playlist selection/deletion.
+  - Set YouTube media.
+  - Clear current media.
 
-### Real-Time Room Sync
+### Media and Playlist
+- Host direct upload to Azure Blob Storage.
+- Viewer request-to-add workflow (host/co-host moderation).
+- Host-only `Sync Playlist from Blob` action to refresh playlist without rejoining.
+- Playlist supports selecting active item and deleting specific items.
+- Host/co-host can clear currently active media.
+- YouTube link playback mode with room sync.
 
-- Join by `roomId` and display name.
-- First user becomes host automatically.
-- Host controls are synced to all viewers:
-  - Play
-  - Pause
-  - Seek
-  - Periodic playback state updates
-- Host role handover happens automatically if host disconnects.
-
-### Media Sources
-
-- Host direct video upload to Azure Blob Storage.
-- Viewer upload request queue (host approval workflow).
-- Host can paste a YouTube URL and switch room playback to synced YouTube mode.
-- Host can clear current media (Blob or YouTube).
-
-### Playlist and Queue Management
-
-- Playlist is visible to room members.
-- Host can select any playlist item to play.
-- Host can delete a specific playlist item.
-- Viewer requests can be approved or rejected by host.
-- Playlist can sync from existing blobs under room prefix.
+### Player Controls
+- Play/Pause
+- Seek
+- Mute/Unmute
+- Volume slider
+- Fullscreen
 
 ### Upload UX
-
-- Upload progress bar and percent text for user actions.
-- Host upload and viewer request both use progress-aware XHR flow.
-
-### Player Controls (Current)
-
-- Play/Pause
-- Mute/Unmute
-- Fullscreen
-- Volume slider
-- Seek slider + live time display
+- Upload progress bar with percentage text.
+- Progress for both host upload and viewer request upload.
 
 ## Tech Stack
-
-- Node.js + Express
-- Socket.IO (real-time room communication)
-- Multer (`memoryStorage`) for in-memory upload handling
-- Azure Blob Storage (`@azure/storage-blob`)
-- Vanilla HTML/CSS/JS frontend
+- Backend: Node.js, Express, Socket.IO
+- Frontend: Vanilla HTML/CSS/JS
+- Upload handling: Multer (`memoryStorage`)
+- Storage: Azure Blob Storage (`@azure/storage-blob`)
+- Config: `dotenv`
 
 ## Project Structure
 
@@ -62,6 +52,7 @@ WatchParty/
   server.js
   package.json
   README.md
+  CHANGELOG.md
   public/
     watch-party.html
     watch-party.css
@@ -70,7 +61,7 @@ WatchParty/
 
 ## Environment Variables
 
-Create `.env` (local) and set same values in Azure App Service Application Settings:
+Use local `.env` and Azure App Service Application Settings:
 
 ```env
 PORT=3000
@@ -80,7 +71,6 @@ CONTAINER_NAME=...
 ```
 
 Supported aliases:
-
 - `AZURE_STORAGE_SAS_TOKEN`
 - `AZURE_STORAGE_ACCOUNT_NAME`
 - `AZURE_STORAGE_CONTAINER_NAME`
@@ -92,22 +82,23 @@ npm install
 npm start
 ```
 
-Open `http://localhost:3000`.
+Open: `http://localhost:3000`
 
-## Main API Endpoints
+## API Endpoints
 
-- `POST /api/upload/:roomId` - host uploads directly to playlist
-- `POST /api/request-upload/:roomId` - viewer submits upload request
-- `POST /api/request-action/:roomId` - host approves/rejects a request
-- `POST /api/select-video/:roomId` - host switches active playlist video
-- `POST /api/delete-video/:roomId` - host deletes one playlist item
-- `POST /api/set-youtube/:roomId` - host sets YouTube media for room
-- `POST /api/clear-upload/:roomId` - host clears current media
+- `POST /api/upload/:roomId` - host direct upload
+- `POST /api/request-upload/:roomId` - viewer upload request
+- `POST /api/request-action/:roomId` - approve/reject request (host/co-host)
+- `POST /api/select-video/:roomId` - select playlist media (host/co-host)
+- `POST /api/delete-video/:roomId` - delete playlist item (host/co-host)
+- `POST /api/set-youtube/:roomId` - set YouTube media (host/co-host)
+- `POST /api/clear-upload/:roomId` - clear current media (host/co-host)
+- `POST /api/sync-playlist/:roomId` - manual blob refresh (host only)
+- `POST /api/member-role/:roomId` - promote/demote co-host (host only)
 
-## Main Socket Events
+## Socket Events
 
 Client -> Server:
-
 - `join-room`
 - `host-play`
 - `host-pause`
@@ -116,7 +107,6 @@ Client -> Server:
 - `request-sync`
 
 Server -> Client:
-
 - `room-state`
 - `playlist-updated`
 - `queue-updated`
@@ -126,80 +116,42 @@ Server -> Client:
 - `room-members`
 - `host-changed`
 
-## Known Limitations in v1
+## Known Limitations
+- Room state is in-memory (resets on server restart).
+- No auth/user accounts yet.
+- No persistent metadata DB yet.
 
-- Room state is in memory (resets on server restart).
-- No authentication/authorization yet.
-- No persistent database for room metadata yet.
-- Large upload reliability depends on plan limits/network conditions.
-
-## Future Potential Updates
-
-### v1.1
-
-- Role-based permissions (host, co-host, viewer).
-- Stronger moderation controls for queue and playlist.
-- Better reconnect/resync logic for unstable networks.
+## Future Roadmap
 
 ### v1.2
-
-- Real-time in-room text chat.
-- Reactions, typing indicators, and message history.
-- Room-level activity logs.
+- Real-time room chat and message history.
+- Reaction system and typing indicators.
+- Better reconnect/resync behavior.
 
 ### v2.0
+- Authentication + custom room system (private/public, invite links, room settings).
+- Persistent metadata store (recommended: PostgreSQL).
 
-- User accounts and authentication (OAuth/email).
-- Custom room system:
-  - private/public rooms
-  - invite codes
-  - password-protected rooms
-  - room presets
-- Persistent metadata database (recommended: PostgreSQL).
+### v2.1+
+- WebRTC voice/video call integration.
+- Horizontal scaling with Redis adapter.
+- Optional transcoding/HLS pipeline for larger files.
 
-### v2.1
+## Versioning (GitHub)
+Use semantic versioning:
+- Patch: `v1.1.1` (bug fixes)
+- Minor: `v1.2.0` (new backward-compatible features)
+- Major: `v2.0.0` (breaking changes)
 
-- Video/audio call integration (WebRTC).
-- Participant grid and host moderation controls.
-- Optional voice-only mode.
-
-### v2.2+
-
-- Multi-instance scaling with Redis + Socket.IO adapter.
-- Background jobs for cleanup and queue expiry.
-- HLS/transcoding pipeline for smoother large-file playback.
-
-## Database Recommendation
-
-For production metadata (rooms, playlist entries, queue state, users), use PostgreSQL. Keep large media files in Azure Blob Storage. Optionally add Redis for realtime scaling/session state.
-
-## Versioning and Release Plan (GitHub)
-
-Use semantic versioning.
-
-### Suggested baseline
-
-- `v1.0.0`: current stable watch-party app.
-
-### Commands to publish v1
+Release commands:
 
 ```bash
-git checkout -b release/v1.0.0
+git checkout -b release/v1.1.0
 git add .
-git commit -m "release: v1.0.0 watchparty core"
-git push -u origin release/v1.0.0
-git tag -a v1.0.0 -m "WatchParty v1.0.0"
-git push origin v1.0.0
+git commit -m "release: v1.1.0 co-host + blob sync"
+git push -u origin release/v1.1.0
+git tag -a v1.1.0 -m "WatchParty v1.1.0"
+git push origin v1.1.0
 ```
 
-Then on GitHub:
-
-1. Open Releases.
-2. Create a new release from tag `v1.0.0`.
-3. Add release notes (features, known limitations, next roadmap).
-
-### Ongoing version strategy
-
-- Patch: `v1.0.1` for bug fixes only.
-- Minor: `v1.1.0` for backward-compatible new features.
-- Major: `v2.0.0` for breaking architecture/product changes.
+Then create a GitHub Release from `v1.1.0`.
