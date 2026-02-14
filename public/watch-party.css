@@ -115,7 +115,8 @@ button {
 #joinBtn,
 .upload-label,
 .request-action.approve,
-#setYoutubeBtn {
+#setYoutubeBtn,
+#syncBlobBtn {
   background: linear-gradient(45deg, var(--accent), #ff7a45);
   border-color: rgba(255, 188, 168, 0.7);
 }
@@ -202,7 +203,8 @@ h3 {
   gap: 6px;
 }
 
-#clearUploadBtn {
+#clearUploadBtn,
+#syncBlobBtn {
   justify-self: start;
 }
 
@@ -224,7 +226,8 @@ h3 {
 }
 
 .playlist-list,
-.request-queue-list {
+.request-queue-list,
+.member-list {
   margin: 0 0 14px;
   padding: 0;
   list-style: none;
@@ -235,7 +238,8 @@ h3 {
 }
 
 .playlist-item,
-.request-item {
+.request-item,
+.member-item {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
@@ -298,14 +302,19 @@ h3 {
   color: #ffd8d8;
 }
 
-#memberList {
-  margin: 0;
-  padding-left: 18px;
-  color: #dce7ff;
+.member-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
 }
 
-#memberList li {
-  margin-bottom: 6px;
+.member-role-btn {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  background: rgba(79, 208, 255, 0.15);
+  border-color: rgba(79, 208, 255, 0.5);
 }
 
 .disabled {

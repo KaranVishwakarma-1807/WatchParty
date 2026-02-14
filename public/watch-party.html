@@ -63,9 +63,11 @@
           <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
 
           <div class="youtube-box">
-            <input id="youtubeUrlInput" type="text" placeholder="Paste YouTube URL (Host)" />
+            <input id="youtubeUrlInput" type="text" placeholder="Paste YouTube URL (Host/Co-host)" />
             <button id="setYoutubeBtn" type="button">Set YouTube</button>
           </div>
+
+          <button id="syncBlobBtn" class="disabled" type="button" disabled>Sync Playlist from Blob</button>
 
           <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
             <div class="upload-progress-track">
@@ -83,7 +85,7 @@
         <ul id="requestQueueList" class="request-queue-list"></ul>
 
         <h3>Members</h3>
-        <ul id="memberList"></ul>
+        <ul id="memberList" class="member-list"></ul>
       </aside>
     </section>
   </main>

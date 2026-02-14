@@ -12,6 +12,7 @@ const requestQueueList = document.getElementById("requestQueueList");
 const uploadLabel = document.getElementById("uploadLabel");
 const uploadInput = document.getElementById("uploadInput");
 const clearUploadBtn = document.getElementById("clearUploadBtn");
+const syncBlobBtn = document.getElementById("syncBlobBtn");
 const uploadProgressWrap = document.getElementById("uploadProgressWrap");
 const uploadProgressFill = document.getElementById("uploadProgressFill");
 const uploadProgressText = document.getElementById("uploadProgressText");
@@ -34,8 +35,10 @@ let currentVideoId = null;
 let currentMedia = null;
 let playlist = [];
 let pendingRequests = [];
+let currentMembers = [];
 let selfId = "";
 let isHost = false;
+let isCoHost = false;
 let applyingRemote = false;
 let lastHostStateSentAt = 0;
 let youtubePlayer = null;
@@ -60,6 +63,21 @@ function isYoutubeMode() {
 
 function isBlobMode() {
   return currentMedia?.type === "blob";
+}
+
+function canManageMedia() {
+  return isHost || isCoHost;
+}
+
+function updateSelfRoleFromMembers() {
+  const self = currentMembers.find((m) => m.id === selfId);
+  const role = self?.role || "viewer";
+  isHost = role === "host";
+  isCoHost = role === "cohost";
+}
+
+function getHostName() {
+  return currentMembers.find((m) => m.id === currentHostId)?.name || "Unknown";
 }
 
 function updateActivePlayerUI() {
@@ -141,7 +159,7 @@ function renderPlaylist() {
     title.title = `${item.fileName}${item.uploadedByName ? ` - by ${item.uploadedByName}` : ""}`;
     li.appendChild(title);
 
-    if (isHost) {
+    if (canManageMedia()) {
       title.addEventListener("click", async () => {
         if (item.id === currentVideoId && isBlobMode()) return;
         try {
@@ -219,7 +237,7 @@ function renderRequestQueue() {
     meta.textContent = `Requested by ${request.requestedByName}`;
     li.appendChild(meta);
 
-    if (isHost) {
+    if (canManageMedia()) {
       const actions = document.createElement("div");
       actions.className = "request-actions";
 
@@ -264,30 +282,76 @@ async function actOnRequest(requestId, action, fileName) {
   }
 }
 
-function updateRoleUI() {
-  roleText.textContent = `Role: ${isHost ? "Host" : "Viewer"}`;
-  uploadLabel.textContent = isHost ? "Upload Video (Host Direct)" : "Request Video Add";
-  clearUploadBtn.disabled = !isHost;
-  setYoutubeBtn.disabled = !isHost;
-  youtubeUrlInput.disabled = !isHost;
+async function updateMemberRole(targetSocketId, action, memberName) {
+  try {
+    const response = await fetch(`/api/member-role/${currentRoomId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ socketId: selfId, targetSocketId, action }),
+    });
 
-  if (isHost) {
-    clearUploadBtn.classList.remove("disabled");
-    setYoutubeBtn.classList.remove("disabled");
-  } else {
-    clearUploadBtn.classList.add("disabled");
-    setYoutubeBtn.classList.add("disabled");
+    const result = await response.json();
+    if (!response.ok) {
+      statusText.textContent = result.error || "Failed to update member role.";
+      return;
+    }
+
+    statusText.textContent = `${action === "promote" ? "Promoted" : "Demoted"}: ${memberName}`;
+  } catch {
+    statusText.textContent = "Failed to update member role.";
   }
+}
+
+function updateRoleUI() {
+  const role = isHost ? "Host" : isCoHost ? "Co-host" : "Viewer";
+  roleText.textContent = `Role: ${role}`;
+
+  uploadLabel.textContent = isHost ? "Upload Video (Host Direct)" : "Request Video Add";
+
+  clearUploadBtn.disabled = !canManageMedia();
+  setYoutubeBtn.disabled = !canManageMedia();
+  youtubeUrlInput.disabled = !canManageMedia();
+  syncBlobBtn.disabled = !isHost;
+
+  clearUploadBtn.classList.toggle("disabled", !canManageMedia());
+  setYoutubeBtn.classList.toggle("disabled", !canManageMedia());
+  syncBlobBtn.classList.toggle("disabled", !isHost);
 
   renderPlaylist();
   renderRequestQueue();
+  renderMembers();
 }
 
-function updateMembers(members) {
+function renderMembers() {
   memberList.innerHTML = "";
-  members.forEach((member) => {
+
+  currentMembers.forEach((member) => {
     const li = document.createElement("li");
-    li.textContent = member.id === currentHostId ? `${member.name} (Host)` : member.name;
+    li.className = "member-item";
+
+    const name = document.createElement("span");
+    const roleTag = member.role === "host" ? "Host" : member.role === "cohost" ? "Co-host" : "Viewer";
+    name.textContent = `${member.name} (${roleTag})`;
+    li.appendChild(name);
+
+    if (isHost && member.id !== selfId && member.role !== "host") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "member-role-btn";
+
+      if (member.role === "cohost") {
+        button.textContent = "Demote";
+        button.addEventListener("click", () => updateMemberRole(member.id, "demote", member.name));
+      } else {
+        button.textContent = "Promote";
+        button.addEventListener("click", () => updateMemberRole(member.id, "promote", member.name));
+      }
+
+      li.appendChild(button);
+    }
+
     memberList.appendChild(li);
   });
 }
@@ -479,7 +543,7 @@ joinBtn.addEventListener("click", () => {
 });
 
 setYoutubeBtn.addEventListener("click", async () => {
-  if (!isHost || !currentRoomId) return;
+  if (!canManageMedia() || !currentRoomId) return;
   const url = youtubeUrlInput.value.trim();
   if (!url) {
     statusText.textContent = "Paste a YouTube URL.";
@@ -502,6 +566,30 @@ setYoutubeBtn.addEventListener("click", async () => {
     statusText.textContent = "YouTube media set for room.";
   } catch {
     statusText.textContent = "Failed to set YouTube media.";
+  }
+});
+
+syncBlobBtn.addEventListener("click", async () => {
+  if (!isHost || !currentRoomId) return;
+
+  try {
+    const response = await fetch(`/api/sync-playlist/${currentRoomId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ socketId: selfId }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      statusText.textContent = result.error || "Failed to sync playlist from blob.";
+      return;
+    }
+
+    statusText.textContent = "Playlist synced from blob.";
+  } catch {
+    statusText.textContent = "Failed to sync playlist from blob.";
   }
 });
 
@@ -563,7 +651,7 @@ uploadInput.addEventListener("change", async (event) => {
 });
 
 clearUploadBtn.addEventListener("click", async () => {
-  if (!isHost || !currentRoomId) return;
+  if (!canManageMedia() || !currentRoomId) return;
 
   try {
     const response = await fetch(`/api/clear-upload/${currentRoomId}`, {
@@ -706,19 +794,20 @@ socket.on("connect", () => {
   selfId = socket.id;
 });
 
-socket.on("room-state", async ({ roomId, isHost: hostRole, hostId, media, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
+socket.on("room-state", async ({ roomId, isHost: hostRole, isCoHost: coHostRole, hostId, media, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
   currentRoomId = roomId;
-  isHost = hostRole;
+  isHost = Boolean(hostRole);
+  isCoHost = Boolean(coHostRole);
   currentHostId = hostId;
   playlist = Array.isArray(roomPlaylist) ? roomPlaylist : [];
   pendingRequests = Array.isArray(queue) ? queue : [];
   currentVideoId = activeVideoId || null;
+  currentMembers = Array.isArray(members) ? members : [];
 
+  updateSelfRoleFromMembers();
   updateRoleUI();
-  updateMembers(members);
 
-  const hostName = members.find((m) => m.id === hostId)?.name || "Unknown";
-  hostText.textContent = `Host: ${hostName}`;
+  hostText.textContent = `Host: ${getHostName()}`;
   statusText.textContent = `Joined room: ${roomId}`;
 
   if (media) {
@@ -755,15 +844,15 @@ socket.on("room-media-cleared", () => {
 
 socket.on("room-members", ({ hostId, members }) => {
   currentHostId = hostId;
-  const hostName = members.find((m) => m.id === hostId)?.name || "Unknown";
-  hostText.textContent = `Host: ${hostName}`;
-  updateMembers(members);
+  currentMembers = Array.isArray(members) ? members : [];
+  updateSelfRoleFromMembers();
+  hostText.textContent = `Host: ${getHostName()}`;
+  updateRoleUI();
 });
 
 socket.on("host-changed", ({ hostId }) => {
   currentHostId = hostId;
-  isHost = hostId === selfId;
-  updateRoleUI();
+  hostText.textContent = `Host: ${getHostName()}`;
 });
 
 socket.on("sync-state", async (payload) => {

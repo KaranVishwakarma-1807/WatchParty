@@ -56,6 +56,7 @@ function getRoom(roomId) {
     rooms.set(roomId, {
       hostId: null,
       members: new Map(),
+      coHostIds: new Set(),
       playlist: [],
       pendingRequests: [],
       currentMedia: null,
@@ -78,7 +79,10 @@ function normalizeRoomId(roomId) {
 }
 
 function getMembersPayload(room) {
-  return [...room.members.entries()].map(([id, name]) => ({ id, name }));
+  return [...room.members.entries()].map(([id, name]) => {
+    const role = room.hostId === id ? "host" : room.coHostIds.has(id) ? "cohost" : "viewer";
+    return { id, name, role };
+  });
 }
 
 function syncPayload(room) {
@@ -95,6 +99,17 @@ function resetPlaybackState(room) {
     isPlaying: false,
     updatedAt: Date.now(),
   };
+}
+
+function canManageMedia(room, socketId) {
+  return room.hostId === socketId || room.coHostIds.has(socketId);
+}
+
+function emitMembersUpdate(roomId, room) {
+  io.to(roomId).emit("room-members", {
+    hostId: room.hostId,
+    members: getMembersPayload(room),
+  });
 }
 
 function ensureAzureReady() {
@@ -271,20 +286,26 @@ async function syncRoomPlaylistFromBlob(roomId, room) {
     });
   }
 
-  if (!items.length) return;
-
   items.sort((a, b) => a.uploadedAt - b.uploadedAt);
   room.playlist = items;
 
-  const currentBlobId = room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null;
-  const hasCurrent = currentBlobId && room.playlist.some((item) => item.id === currentBlobId);
-  if (!hasCurrent && !room.currentMedia) {
+  const currentIsBlob = room.currentMedia?.type === "blob";
+  if (!currentIsBlob) return;
+
+  const currentBlobId = room.currentMedia.videoId;
+  const hasCurrent = room.playlist.some((item) => item.id === currentBlobId);
+
+  if (hasCurrent) return;
+
+  if (room.playlist.length) {
     room.currentMedia = {
       type: "blob",
       videoId: room.playlist[0].id,
     };
-    resetPlaybackState(room);
+  } else {
+    room.currentMedia = null;
   }
+  resetPlaybackState(room);
 }
 
 function parseYouTubeVideoId(url) {
@@ -419,8 +440,8 @@ app.post("/api/set-youtube/:roomId", async (req, res) => {
     const url = String(req.body.url || "").trim();
     const room = rooms.get(roomId);
 
-    if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can set YouTube media." });
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can set YouTube media." });
     }
 
     const youtubeId = parseYouTubeVideoId(url);
@@ -502,8 +523,8 @@ app.post("/api/request-action/:roomId", async (req, res) => {
     const action = String(req.body.action || "").toLowerCase();
     const room = rooms.get(roomId);
 
-    if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can approve or reject requests." });
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can approve or reject requests." });
     }
 
     if (action !== "approve" && action !== "reject") {
@@ -549,8 +570,8 @@ app.post("/api/select-video/:roomId", async (req, res) => {
     const videoId = req.body.videoId;
     const room = rooms.get(roomId);
 
-    if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can select video." });
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can select video." });
     }
 
     const found = room.playlist.find((item) => item.id === videoId);
@@ -581,8 +602,8 @@ app.post("/api/delete-video/:roomId", async (req, res) => {
     const videoId = req.body.videoId;
     const room = rooms.get(roomId);
 
-    if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can delete videos." });
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can delete videos." });
     }
 
     const result = await deleteVideoById(roomId, room, videoId);
@@ -603,8 +624,8 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
     const socketId = req.body.socketId;
     const room = rooms.get(roomId);
 
-    if (!room || !socketId || room.hostId !== socketId) {
-      return res.status(403).json({ error: "Only the room host can clear current media." });
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can clear current media." });
     }
 
     if (!room.currentMedia) {
@@ -631,6 +652,77 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
   }
 });
 
+app.post("/api/sync-playlist/:roomId", async (req, res) => {
+  try {
+    ensureAzureReady();
+
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can sync from blob." });
+    }
+
+    const previousMediaType = room.currentMedia?.type || null;
+    const previousBlobId = room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null;
+
+    await syncRoomPlaylistFromBlob(roomId, room);
+
+    emitPlaylistUpdate(roomId, room);
+
+    if (!room.currentMedia && previousMediaType === "blob") {
+      emitMediaCleared(roomId, room);
+    } else if (
+      room.currentMedia?.type === "blob" &&
+      (previousMediaType !== "blob" || previousBlobId !== room.currentMedia.videoId)
+    ) {
+      emitMediaChanged(roomId, room);
+    }
+
+    return res.json({ ok: true, playlist: playlistPayload(room) });
+  } catch (error) {
+    console.error("Sync playlist failed:", error.message);
+    return res.status(500).json({ error: "Failed to sync playlist from blob." });
+  }
+});
+
+app.post("/api/member-role/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const targetSocketId = req.body.targetSocketId;
+    const action = String(req.body.action || "").toLowerCase();
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || room.hostId !== socketId) {
+      return res.status(403).json({ error: "Only the room host can change member roles." });
+    }
+
+    if (!room.members.has(targetSocketId)) {
+      return res.status(404).json({ error: "Member not found in room." });
+    }
+
+    if (targetSocketId === room.hostId) {
+      return res.status(400).json({ error: "Host role cannot be modified." });
+    }
+
+    if (action === "promote") {
+      room.coHostIds.add(targetSocketId);
+    } else if (action === "demote") {
+      room.coHostIds.delete(targetSocketId);
+    } else {
+      return res.status(400).json({ error: "Invalid role action." });
+    }
+
+    emitMembersUpdate(roomId, room);
+    return res.json({ ok: true, members: getMembersPayload(room) });
+  } catch (error) {
+    console.error("Role update failed:", error.message);
+    return res.status(500).json({ error: "Failed to update member role." });
+  }
+});
+
 io.on("connection", (socket) => {
   socket.on("join-room", async ({ roomId, name }) => {
     const normalizedRoomId = normalizeRoomId(roomId);
@@ -650,11 +742,13 @@ io.on("connection", (socket) => {
     room.members.set(socket.id, safeName);
     if (!room.hostId) {
       room.hostId = socket.id;
+      room.coHostIds.delete(room.hostId);
     }
 
     socket.emit("room-state", {
       roomId: normalizedRoomId,
       isHost: room.hostId === socket.id,
+      isCoHost: room.coHostIds.has(socket.id),
       hostId: room.hostId,
       media: getCurrentMediaPayload(room),
       playlist: playlistPayload(room),
@@ -664,10 +758,7 @@ io.on("connection", (socket) => {
       members: getMembersPayload(room),
     });
 
-    io.to(normalizedRoomId).emit("room-members", {
-      hostId: room.hostId,
-      members: getMembersPayload(room),
-    });
+    emitMembersUpdate(normalizedRoomId, room);
   });
 
   socket.on("host-play", ({ time = 0 }) => {
@@ -736,10 +827,14 @@ io.on("connection", (socket) => {
     if (!room) return;
 
     room.members.delete(socket.id);
+    room.coHostIds.delete(socket.id);
 
     if (room.hostId === socket.id) {
       const [nextHostId] = room.members.keys();
       room.hostId = nextHostId || null;
+      if (room.hostId) {
+        room.coHostIds.delete(room.hostId);
+      }
     }
 
     if (room.members.size === 0) {
@@ -758,10 +853,7 @@ io.on("connection", (socket) => {
     }
 
     io.to(roomId).emit("host-changed", { hostId: room.hostId });
-    io.to(roomId).emit("room-members", {
-      hostId: room.hostId,
-      members: getMembersPayload(room),
-    });
+    emitMembersUpdate(roomId, room);
     emitQueueUpdate(roomId, room);
   });
 });
