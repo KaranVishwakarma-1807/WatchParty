@@ -58,6 +58,12 @@
         <div class="upload-box">
           <label for="uploadInput" class="upload-label">Upload Video (Host)</label>
           <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
+          <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
+            <div class="upload-progress-track">
+              <div id="uploadProgressFill" class="upload-progress-fill"></div>
+            </div>
+            <p id="uploadProgressText" class="upload-progress-text">0%</p>
+          </div>
           <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Uploaded Video</button>
         </div>
 
@@ -71,3 +77,4 @@
   <script src="watch-party.js"></script>
 </body>
 </html>
+

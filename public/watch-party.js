@@ -9,6 +9,9 @@ const hostText = document.getElementById("hostText");
 const memberList = document.getElementById("memberList");
 const uploadInput = document.getElementById("uploadInput");
 const clearUploadBtn = document.getElementById("clearUploadBtn");
+const uploadProgressWrap = document.getElementById("uploadProgressWrap");
+const uploadProgressFill = document.getElementById("uploadProgressFill");
+const uploadProgressText = document.getElementById("uploadProgressText");
 
 const video = document.getElementById("videoPlayer");
 const videoTitle = document.getElementById("videoTitle");
@@ -93,6 +96,20 @@ async function applyRemoteState(payload) {
   }
 }
 
+function setUploadProgress(percent, text) {
+  const bounded = Math.min(100, Math.max(0, Number(percent) || 0));
+  uploadProgressWrap.classList.remove("hidden");
+  uploadProgressFill.style.width = `${bounded}%`;
+  uploadProgressText.textContent = text || `${Math.round(bounded)}%`;
+}
+
+function resetUploadProgress(delayMs = 1200) {
+  setTimeout(() => {
+    uploadProgressFill.style.width = "0%";
+    uploadProgressText.textContent = "0%";
+    uploadProgressWrap.classList.add("hidden");
+  }, delayMs);
+}
 function emitHostState(eventName) {
   if (!isHost || !video.src || applyingRemote) return;
   socket.emit(eventName, { time: video.currentTime, isPlaying: !video.paused });
@@ -119,19 +136,46 @@ uploadInput.addEventListener("change", async (event) => {
   formData.append("video", file);
   formData.append("socketId", selfId);
 
+  setUploadProgress(0, "0%");
+  statusText.textContent = `Uploading ${file.name}...`;
+
   try {
-    const response = await fetch(`/api/upload/${currentRoomId}`, {
-      method: "POST",
-      body: formData,
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/upload/${currentRoomId}`);
+
+      xhr.upload.onprogress = (progressEvent) => {
+        if (!progressEvent.lengthComputable) return;
+        const percent = (progressEvent.loaded / progressEvent.total) * 100;
+        setUploadProgress(percent, `${Math.round(percent)}% uploaded`);
+      };
+
+      xhr.onload = () => {
+        let payload = {};
+        try {
+          payload = JSON.parse(xhr.responseText || "{}");
+        } catch {
+          payload = {};
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(payload);
+        } else {
+          reject(new Error(payload.error || "Upload failed."));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Upload failed due to network/server error."));
+      xhr.send(formData);
     });
-    const result = await response.json();
-    if (!response.ok) {
-      statusText.textContent = result.error || "Upload failed.";
-      return;
-    }
+
+    setUploadProgress(100, "Upload complete");
     statusText.textContent = `Uploaded: ${result.video.fileName}`;
-  } catch {
-    statusText.textContent = "Upload failed due to network/server error.";
+    resetUploadProgress();
+  } catch (error) {
+    statusText.textContent = error.message || "Upload failed.";
+    setUploadProgress(0, "Upload failed");
+    resetUploadProgress(2000);
   } finally {
     uploadInput.value = "";
   }
@@ -276,3 +320,5 @@ document.addEventListener("visibilitychange", () => {
     socket.emit("request-sync");
   }
 });
+
+

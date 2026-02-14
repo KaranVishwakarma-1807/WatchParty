@@ -225,3 +225,33 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
+.upload-progress-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.upload-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.upload-progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #ff6f4d, #4fd0ff);
+  transition: width 150ms linear;
+}
+
+.upload-progress-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.hidden {
+  display: none;
+}
