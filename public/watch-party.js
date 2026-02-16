@@ -31,6 +31,9 @@ const timeText = document.getElementById("timeText");
 const speedSelect = document.getElementById("speedSelect");
 const subtitleSelect = document.getElementById("subtitleSelect");
 const audioTrackSelect = document.getElementById("audioTrackSelect");
+const chatList = document.getElementById("chatList");
+const chatInput = document.getElementById("chatInput");
+const sendChatBtn = document.getElementById("sendChatBtn");
 
 let currentRoomId = "";
 let currentHostId = "";
@@ -39,6 +42,7 @@ let currentMedia = null;
 let playlist = [];
 let pendingRequests = [];
 let currentMembers = [];
+let chatMessages = [];
 let selfId = "";
 let isHost = false;
 let isCoHost = false;
@@ -83,6 +87,50 @@ function getHostName() {
   return currentMembers.find((m) => m.id === currentHostId)?.name || "Unknown";
 }
 
+function formatChatTime(timestamp) {
+  const date = new Date(Number(timestamp) || Date.now());
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderChatMessages() {
+  chatList.innerHTML = "";
+
+  if (!chatMessages.length) {
+    const empty = document.createElement("div");
+    empty.className = "chat-item";
+    empty.textContent = "No messages yet.";
+    chatList.appendChild(empty);
+    return;
+  }
+
+  chatMessages.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "chat-item";
+
+    const meta = document.createElement("div");
+    meta.className = "chat-meta";
+    meta.textContent = `${item.senderName || "Guest"} - ${formatChatTime(item.sentAt)}`;
+
+    const text = document.createElement("div");
+    text.className = "chat-text";
+    text.textContent = item.message || "";
+
+    row.appendChild(meta);
+    row.appendChild(text);
+    chatList.appendChild(row);
+  });
+
+  chatList.scrollTop = chatList.scrollHeight;
+}
+
+function sendChatMessage() {
+  if (!currentRoomId || !selfId) return;
+  const message = String(chatInput.value || "").trim();
+  if (!message) return;
+
+  socket.emit("chat-message", { message });
+  chatInput.value = "";
+}
 function updateActivePlayerUI() {
   if (isYoutubeMode()) {
     video.classList.add("hidden");
@@ -874,6 +922,13 @@ fullscreenBtn.addEventListener("click", async () => {
   }
 });
 
+sendChatBtn.addEventListener("click", sendChatMessage);
+chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    sendChatMessage();
+  }
+});
 speedSelect.addEventListener("change", () => {
   applyPlaybackRate(speedSelect.value);
 });
@@ -997,7 +1052,7 @@ socket.on("connect", () => {
   selfId = socket.id;
 });
 
-socket.on("room-state", async ({ roomId, isHost: hostRole, isCoHost: coHostRole, hostId, media, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members }) => {
+socket.on("room-state", async ({ roomId, isHost: hostRole, isCoHost: coHostRole, hostId, media, playlist: roomPlaylist, pendingRequests: queue, currentVideoId: activeVideoId, state, members, chatMessages: roomChatMessages }) => {
   currentRoomId = roomId;
   isHost = Boolean(hostRole);
   isCoHost = Boolean(coHostRole);
@@ -1006,9 +1061,11 @@ socket.on("room-state", async ({ roomId, isHost: hostRole, isCoHost: coHostRole,
   pendingRequests = Array.isArray(queue) ? queue : [];
   currentVideoId = activeVideoId || null;
   currentMembers = Array.isArray(members) ? members : [];
+  chatMessages = Array.isArray(roomChatMessages) ? roomChatMessages : [];
 
   updateSelfRoleFromMembers();
   updateRoleUI();
+  renderChatMessages();
 
   hostText.textContent = `Host: ${getHostName()}`;
   statusText.textContent = `Joined room: ${roomId}`;
@@ -1030,6 +1087,14 @@ socket.on("playlist-updated", ({ playlist: roomPlaylist, currentVideoId: activeV
   refreshAudioTrackOptions();
 });
 
+socket.on("room-chat-message", (chatItem) => {
+  if (!chatItem || !chatItem.message) return;
+  chatMessages.push(chatItem);
+  if (chatMessages.length > 100) {
+    chatMessages = chatMessages.slice(-100);
+  }
+  renderChatMessages();
+});
 socket.on("queue-updated", ({ pendingRequests: queue }) => {
   pendingRequests = Array.isArray(queue) ? queue : [];
   renderRequestQueue();
@@ -1054,6 +1119,7 @@ socket.on("room-members", ({ hostId, members }) => {
   updateSelfRoleFromMembers();
   hostText.textContent = `Host: ${getHostName()}`;
   updateRoleUI();
+  renderChatMessages();
 });
 
 socket.on("host-changed", ({ hostId }) => {
@@ -1085,4 +1151,10 @@ document.addEventListener("visibilitychange", () => {
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
+
+
+
 

@@ -357,9 +357,45 @@ h3 {
   display: none;
 }
 
+.chat-list {
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  min-height: 140px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.chat-item {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.chat-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-bottom: 2px;
+}
+
+.chat-text {
+  color: #dce7ff;
+  word-break: break-word;
+}
+
+.chat-box {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 10px;
+}
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
   }
 }
+
 

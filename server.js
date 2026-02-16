@@ -60,6 +60,7 @@ function getRoom(roomId) {
       playlist: [],
       pendingRequests: [],
       currentMedia: null,
+      chatMessages: [],
       state: {
         currentTime: 0,
         isPlaying: false,
@@ -103,6 +104,10 @@ function resetPlaybackState(room) {
 
 function canManageMedia(room, socketId) {
   return room.hostId === socketId || room.coHostIds.has(socketId);
+}
+
+function chatPayload(room) {
+  return room.chatMessages.slice(-100);
 }
 
 function emitMembersUpdate(roomId, room) {
@@ -756,6 +761,7 @@ io.on("connection", (socket) => {
       currentVideoId: room.currentMedia?.type === "blob" ? room.currentMedia.videoId : null,
       state: syncPayload(room),
       members: getMembersPayload(room),
+      chatMessages: chatPayload(room),
     });
 
     emitMembersUpdate(normalizedRoomId, room);
@@ -812,6 +818,32 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("sync-state", syncPayload(room));
   });
 
+  socket.on("chat-message", ({ message }) => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.members.has(socket.id)) return;
+
+    const text = String(message || "").trim();
+    if (!text) return;
+
+    const chatItem = {
+      id: crypto.randomUUID(),
+      senderId: socket.id,
+      senderName: room.members.get(socket.id) || socket.data.name || "Guest",
+      message: text.slice(0, 500),
+      sentAt: Date.now(),
+    };
+
+    room.chatMessages.push(chatItem);
+    if (room.chatMessages.length > 100) {
+      room.chatMessages = room.chatMessages.slice(-100);
+    }
+
+    io.to(roomId).emit("room-chat-message", chatItem);
+  });
   socket.on("request-sync", () => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
@@ -861,3 +893,5 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
