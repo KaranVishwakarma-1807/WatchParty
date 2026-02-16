@@ -28,6 +28,9 @@ const fullscreenBtn = document.getElementById("fullscreenBtn");
 const volumeRange = document.getElementById("volumeRange");
 const seekRange = document.getElementById("seekRange");
 const timeText = document.getElementById("timeText");
+const speedSelect = document.getElementById("speedSelect");
+const subtitleSelect = document.getElementById("subtitleSelect");
+const audioTrackSelect = document.getElementById("audioTrackSelect");
 
 let currentRoomId = "";
 let currentHostId = "";
@@ -88,6 +91,145 @@ function updateActivePlayerUI() {
     youtubeContainer.classList.add("hidden");
     video.classList.remove("hidden");
   }
+}
+
+function setSelectOptions(selectEl, options, selectedValue) {
+  selectEl.innerHTML = "";
+  options.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    selectEl.appendChild(option);
+  });
+
+  if (selectedValue && options.some((item) => item.value === selectedValue)) {
+    selectEl.value = selectedValue;
+  } else if (options.length) {
+    selectEl.value = options[0].value;
+  }
+}
+
+function getAudioTracksList() {
+  if (!video.audioTracks) return [];
+  const list = [];
+  for (let i = 0; i < video.audioTracks.length; i += 1) {
+    list.push(video.audioTracks[i]);
+  }
+  return list;
+}
+
+function refreshSubtitleOptions() {
+  if (isYoutubeMode()) {
+    setSelectOptions(subtitleSelect, [{ value: "off", label: "YouTube managed" }], "off");
+    subtitleSelect.disabled = true;
+    subtitleSelect.classList.add("disabled");
+    return;
+  }
+
+  const tracks = Array.from(video.textTracks || []);
+  const options = [{ value: "off", label: "Off" }];
+
+  tracks.forEach((track, index) => {
+    const lang = track.language ? ` (${track.language})` : "";
+    options.push({
+      value: String(index),
+      label: `${track.label || `Track ${index + 1}`}${lang}`,
+    });
+  });
+
+  let selectedValue = "off";
+  tracks.forEach((track, index) => {
+    if (track.mode === "showing") selectedValue = String(index);
+  });
+
+  setSelectOptions(subtitleSelect, options, selectedValue);
+  subtitleSelect.disabled = tracks.length === 0;
+  subtitleSelect.classList.toggle("disabled", tracks.length === 0);
+}
+
+function refreshAudioTrackOptions() {
+  if (isYoutubeMode()) {
+    setSelectOptions(audioTrackSelect, [{ value: "default", label: "YouTube managed" }], "default");
+    audioTrackSelect.disabled = true;
+    audioTrackSelect.classList.add("disabled");
+    return;
+  }
+
+  const tracks = getAudioTracksList();
+  if (!tracks.length) {
+    setSelectOptions(audioTrackSelect, [{ value: "default", label: "Default" }], "default");
+    audioTrackSelect.disabled = true;
+    audioTrackSelect.classList.add("disabled");
+    return;
+  }
+
+  const options = tracks.map((track, index) => {
+    const lang = track.language ? ` (${track.language})` : "";
+    return {
+      value: String(index),
+      label: `${track.label || `Audio ${index + 1}`}${lang}`,
+    };
+  });
+
+  let selectedValue = "0";
+  tracks.forEach((track, index) => {
+    if (track.enabled) selectedValue = String(index);
+  });
+
+  setSelectOptions(audioTrackSelect, options, selectedValue);
+  audioTrackSelect.disabled = false;
+  audioTrackSelect.classList.remove("disabled");
+}
+
+function updateSpeedOptionsForMode() {
+  if (isYoutubeMode()) {
+    const rates = youtubePlayer?.getAvailablePlaybackRates?.();
+    if (Array.isArray(rates) && rates.length) {
+      const options = rates.map((rate) => ({
+        value: String(rate),
+        label: `${rate}x`,
+      }));
+      const currentRate = String(youtubePlayer?.getPlaybackRate?.() || 1);
+      setSelectOptions(speedSelect, options, currentRate);
+      speedSelect.disabled = false;
+      speedSelect.classList.remove("disabled");
+      return;
+    }
+
+    setSelectOptions(speedSelect, [{ value: "1", label: "1x" }], "1");
+    speedSelect.disabled = true;
+    speedSelect.classList.add("disabled");
+    return;
+  }
+
+  speedSelect.disabled = false;
+  speedSelect.classList.remove("disabled");
+  speedSelect.value = String(video.playbackRate || 1);
+}
+
+function applyPlaybackRate(value) {
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate <= 0) return;
+
+  if (isYoutubeMode()) {
+    if (!youtubePlayer || !youtubeReady) return;
+    youtubePlayer.setPlaybackRate?.(rate);
+    const activeRate = youtubePlayer.getPlaybackRate?.() || rate;
+    speedSelect.value = String(activeRate);
+    return;
+  }
+
+  video.playbackRate = rate;
+  speedSelect.value = String(video.playbackRate);
+}
+
+function syncPlaybackRateUI() {
+  if (isYoutubeMode()) {
+    const rate = youtubePlayer?.getPlaybackRate?.();
+    if (rate) speedSelect.value = String(rate);
+    return;
+  }
+  speedSelect.value = String(video.playbackRate || 1);
 }
 
 function getCurrentTimeSec() {
@@ -320,6 +462,9 @@ function updateRoleUI() {
   syncBlobBtn.classList.toggle("disabled", !isHost);
 
   renderPlaylist();
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
   renderRequestQueue();
   renderMembers();
 }
@@ -389,6 +534,9 @@ function clearMediaFromUI() {
   seekRange.value = 0;
   timeText.textContent = "00:00 / 00:00";
   renderPlaylist();
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
 }
 
 function ensureYouTubePlayer(videoId) {
@@ -467,6 +615,9 @@ async function applyMedia(media) {
     playPauseBtn.textContent = "Play";
     updateActivePlayerUI();
     renderPlaylist();
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
     return;
   }
 
@@ -479,6 +630,9 @@ async function applyMedia(media) {
     updateActivePlayerUI();
     videoTitle.textContent = `Now playing: ${currentMedia.title || "YouTube Video"}`;
     renderPlaylist();
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
 
     try {
       await ensureYouTubePlayer(currentMedia.youtubeId);
@@ -720,6 +874,32 @@ fullscreenBtn.addEventListener("click", async () => {
   }
 });
 
+speedSelect.addEventListener("change", () => {
+  applyPlaybackRate(speedSelect.value);
+});
+
+subtitleSelect.addEventListener("change", () => {
+  if (isYoutubeMode()) return;
+
+  const tracks = Array.from(video.textTracks || []);
+  const selected = subtitleSelect.value;
+
+  tracks.forEach((track, index) => {
+    track.mode = selected === String(index) ? "showing" : "disabled";
+  });
+});
+
+audioTrackSelect.addEventListener("change", () => {
+  if (isYoutubeMode()) return;
+
+  const tracks = getAudioTracksList();
+  const selectedIndex = Number(audioTrackSelect.value);
+  if (!tracks.length || !Number.isInteger(selectedIndex)) return;
+
+  tracks.forEach((track, index) => {
+    track.enabled = index === selectedIndex;
+  });
+});
 volumeRange.addEventListener("input", () => {
   const value = Number(volumeRange.value);
 
@@ -749,6 +929,29 @@ seekRange.addEventListener("input", () => {
   }
 });
 
+video.addEventListener("loadedmetadata", () => {
+  if (!isBlobMode()) return;
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
+});
+
+video.addEventListener("ratechange", () => {
+  if (!isBlobMode()) return;
+  syncPlaybackRateUI();
+});
+
+if (video.textTracks) {
+  for (let i = 0; i < video.textTracks.length; i += 1) {
+    video.textTracks[i].addEventListener("change", refreshSubtitleOptions);
+  }
+}
+
+if (video.audioTracks) {
+  video.audioTracks.addEventListener?.("change", refreshAudioTrackOptions);
+  video.audioTracks.addEventListener?.("addtrack", refreshAudioTrackOptions);
+  video.audioTracks.addEventListener?.("removetrack", refreshAudioTrackOptions);
+}
 video.addEventListener("timeupdate", () => {
   if (!isBlobMode()) return;
   renderTimeline();
@@ -822,6 +1025,9 @@ socket.on("playlist-updated", ({ playlist: roomPlaylist, currentVideoId: activeV
   playlist = Array.isArray(roomPlaylist) ? roomPlaylist : [];
   currentVideoId = activeVideoId || null;
   renderPlaylist();
+  updateSpeedOptionsForMode();
+  refreshSubtitleOptions();
+  refreshAudioTrackOptions();
 });
 
 socket.on("queue-updated", ({ pendingRequests: queue }) => {
@@ -866,3 +1072,17 @@ document.addEventListener("visibilitychange", () => {
     socket.emit("request-sync");
   }
 });
+
+
+
+
+
+
+
+
+
+
+updateSpeedOptionsForMode();
+refreshSubtitleOptions();
+refreshAudioTrackOptions();
+

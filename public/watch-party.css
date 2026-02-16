@@ -99,6 +99,7 @@ h1 {
 }
 
 input,
+select,
 button {
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 10px;
@@ -166,6 +167,10 @@ video,
   gap: 6px;
   align-items: center;
   font-size: 0.85rem;
+}
+
+.controls select {
+  min-width: 96px;
 }
 
 #timeText {
@@ -357,3 +362,4 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
