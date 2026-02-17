@@ -18,9 +18,17 @@ const uploadProgressFill = document.getElementById("uploadProgressFill");
 const uploadProgressText = document.getElementById("uploadProgressText");
 const youtubeUrlInput = document.getElementById("youtubeUrlInput");
 const setYoutubeBtn = document.getElementById("setYoutubeBtn");
+const externalUrlInput = document.getElementById("externalUrlInput");
+const setExternalBtn = document.getElementById("setExternalBtn");
+const externalProviderBadge = document.getElementById("externalProviderBadge");
+const externalValidationText = document.getElementById("externalValidationText");
 
 const video = document.getElementById("videoPlayer");
 const youtubeContainer = document.getElementById("youtubeContainer");
+const externalContainer = document.getElementById("externalContainer");
+const externalFrame = document.getElementById("externalFrame");
+const externalFallback = document.getElementById("externalFallback");
+const externalOpenLink = document.getElementById("externalOpenLink");
 const videoTitle = document.getElementById("videoTitle");
 const playPauseBtn = document.getElementById("playPauseBtn");
 const muteBtn = document.getElementById("muteBtn");
@@ -50,7 +58,92 @@ let applyingRemote = false;
 let lastHostStateSentAt = 0;
 let youtubePlayer = null;
 let youtubeReady = false;
+let externalFallbackTimer = null;
 
+const providerRules = [
+  { host: "youtube.com", label: "YouTube", quality: "good", note: "Known provider. Use Set YouTube for best sync." },
+  { host: "youtu.be", label: "YouTube", quality: "good", note: "Known provider. Use Set YouTube for best sync." },
+  { host: "vimeo.com", label: "Vimeo", quality: "good", note: "Known provider. Embed usually works." },
+  { host: "dailymotion.com", label: "Dailymotion", quality: "good", note: "Known provider. Embed usually works." },
+  { host: "dai.ly", label: "Dailymotion", quality: "good", note: "Known provider. Embed usually works." },
+  { host: "twitch.tv", label: "Twitch", quality: "warn", note: "May require provider-specific embed params." },
+  { host: "netflix.com", label: "Netflix", quality: "warn", note: "Likely blocked in iframe due provider restrictions." },
+  { host: "primevideo.com", label: "Prime Video", quality: "warn", note: "Likely blocked in iframe due provider restrictions." },
+  { host: "disneyplus.com", label: "Disney+", quality: "warn", note: "Likely blocked in iframe due provider restrictions." },
+  { host: "hulu.com", label: "Hulu", quality: "warn", note: "Likely blocked in iframe due provider restrictions." },
+  { host: "max.com", label: "Max", quality: "warn", note: "Likely blocked in iframe due provider restrictions." },
+];
+
+function setExternalValidationState(quality, provider, message) {
+  const classes = ["neutral", "good", "warn", "error"];
+  externalProviderBadge.classList.remove(...classes);
+  externalValidationText.classList.remove(...classes);
+
+  const safeQuality = classes.includes(quality) ? quality : "neutral";
+  externalProviderBadge.classList.add(safeQuality);
+  externalValidationText.classList.add(safeQuality);
+  externalProviderBadge.textContent = `Provider: ${provider}`;
+  externalValidationText.textContent = message;
+}
+
+function analyzeExternalUrl(rawUrl) {
+  const trimmed = String(rawUrl || "").trim();
+
+  if (!trimmed) {
+    return {
+      isValid: false,
+      provider: "-",
+      quality: "neutral",
+      message: "Paste a URL to check provider support.",
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      isValid: false,
+      provider: "Unknown",
+      quality: "error",
+      message: "Invalid URL. Use full http(s):// URL.",
+    };
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return {
+      isValid: false,
+      provider: "Unknown",
+      quality: "error",
+      message: "Only http(s) URLs are supported.",
+    };
+  }
+
+  const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+  const matched = providerRules.find((rule) => host === rule.host || host.endsWith(`.${rule.host}`));
+
+  if (matched) {
+    return {
+      isValid: true,
+      provider: matched.label,
+      quality: matched.quality,
+      message: matched.note,
+    };
+  }
+
+  return {
+    isValid: true,
+    provider: host,
+    quality: "warn",
+    message: "Unknown provider. Embed may be blocked; fallback link will appear if needed.",
+  };
+}
+
+function refreshExternalUrlValidation() {
+  const insight = analyzeExternalUrl(externalUrlInput.value);
+  setExternalValidationState(insight.quality, insight.provider, insight.message);
+  return insight;
+}
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
   const mins = Math.floor(seconds / 60);
@@ -70,6 +163,10 @@ function isYoutubeMode() {
 
 function isBlobMode() {
   return currentMedia?.type === "blob";
+}
+
+function isExternalMode() {
+  return currentMedia?.type === "external";
 }
 
 function canManageMedia() {
@@ -134,11 +231,80 @@ function sendChatMessage() {
 function updateActivePlayerUI() {
   if (isYoutubeMode()) {
     video.classList.add("hidden");
+    externalContainer.classList.add("hidden");
     youtubeContainer.classList.remove("hidden");
+  } else if (isExternalMode()) {
+    video.classList.add("hidden");
+    youtubeContainer.classList.add("hidden");
+    externalContainer.classList.remove("hidden");
   } else {
     youtubeContainer.classList.add("hidden");
+    externalContainer.classList.add("hidden");
     video.classList.remove("hidden");
   }
+}
+
+function buildExternalEmbedUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be") {
+      return rawUrl;
+    }
+
+    if (host === "vimeo.com") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0];
+      if (id) return `https://player.vimeo.com/video/${id}`;
+    }
+
+    if (host === "dailymotion.com") {
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const idx = parts.indexOf("video");
+      if (idx > -1 && parts[idx + 1]) return `https://www.dailymotion.com/embed/video/${parts[idx + 1]}`;
+    }
+
+    if (host === "dai.ly") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0];
+      if (id) return `https://www.dailymotion.com/embed/video/${id}`;
+    }
+
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function showExternalFallback(url) {
+  externalOpenLink.href = url;
+  externalFallback.classList.remove("hidden");
+}
+
+function hideExternalFallback() {
+  externalFallback.classList.add("hidden");
+  if (externalFallbackTimer) {
+    clearTimeout(externalFallbackTimer);
+    externalFallbackTimer = null;
+  }
+}
+
+function loadExternalEmbed(url) {
+  hideExternalFallback();
+  const embedUrl = buildExternalEmbedUrl(url);
+  externalFrame.src = "about:blank";
+
+  externalFallbackTimer = setTimeout(() => {
+    showExternalFallback(url);
+  }, 5000);
+
+  externalFrame.onload = () => {
+    if (externalFallbackTimer) {
+      clearTimeout(externalFallbackTimer);
+      externalFallbackTimer = null;
+    }
+  };
+
+  externalFrame.src = embedUrl;
 }
 
 function setSelectOptions(selectEl, options, selectedValue) {
@@ -167,7 +333,7 @@ function getAudioTracksList() {
 }
 
 function refreshSubtitleOptions() {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     setSelectOptions(subtitleSelect, [{ value: "off", label: "YouTube managed" }], "off");
     subtitleSelect.disabled = true;
     subtitleSelect.classList.add("disabled");
@@ -196,7 +362,7 @@ function refreshSubtitleOptions() {
 }
 
 function refreshAudioTrackOptions() {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     setSelectOptions(audioTrackSelect, [{ value: "default", label: "YouTube managed" }], "default");
     audioTrackSelect.disabled = true;
     audioTrackSelect.classList.add("disabled");
@@ -230,13 +396,17 @@ function refreshAudioTrackOptions() {
 }
 
 function updateSpeedOptionsForMode() {
+  if (isExternalMode()) {
+    setSelectOptions(speedSelect, [{ value: "1", label: "1x" }], "1");
+    speedSelect.disabled = true;
+    speedSelect.classList.add("disabled");
+    return;
+  }
+
   if (isYoutubeMode()) {
     const rates = youtubePlayer?.getAvailablePlaybackRates?.();
     if (Array.isArray(rates) && rates.length) {
-      const options = rates.map((rate) => ({
-        value: String(rate),
-        label: `${rate}x`,
-      }));
+      const options = rates.map((rate) => ({ value: String(rate), label: `${rate}x` }));
       const currentRate = String(youtubePlayer?.getPlaybackRate?.() || 1);
       setSelectOptions(speedSelect, options, currentRate);
       speedSelect.disabled = false;
@@ -259,6 +429,8 @@ function applyPlaybackRate(value) {
   const rate = Number(value);
   if (!Number.isFinite(rate) || rate <= 0) return;
 
+  if (isExternalMode()) return;
+
   if (isYoutubeMode()) {
     if (!youtubePlayer || !youtubeReady) return;
     youtubePlayer.setPlaybackRate?.(rate);
@@ -272,6 +444,10 @@ function applyPlaybackRate(value) {
 }
 
 function syncPlaybackRateUI() {
+  if (isExternalMode()) {
+    speedSelect.value = "1";
+    return;
+  }
   if (isYoutubeMode()) {
     const rate = youtubePlayer?.getPlaybackRate?.();
     if (rate) speedSelect.value = String(rate);
@@ -281,7 +457,7 @@ function syncPlaybackRateUI() {
 }
 
 function getCurrentTimeSec() {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (youtubePlayer && youtubeReady && typeof youtubePlayer.getCurrentTime === "function") {
       return Number(youtubePlayer.getCurrentTime()) || 0;
     }
@@ -291,7 +467,7 @@ function getCurrentTimeSec() {
 }
 
 function getDurationSec() {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (youtubePlayer && youtubeReady && typeof youtubePlayer.getDuration === "function") {
       return Number(youtubePlayer.getDuration()) || 0;
     }
@@ -301,7 +477,7 @@ function getDurationSec() {
 }
 
 function isPlayingNow() {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (!youtubePlayer || !youtubeReady || typeof youtubePlayer.getPlayerState !== "function") return false;
     return youtubePlayer.getPlayerState() === 1;
   }
@@ -503,10 +679,13 @@ function updateRoleUI() {
   clearUploadBtn.disabled = !canManageMedia();
   setYoutubeBtn.disabled = !canManageMedia();
   youtubeUrlInput.disabled = !canManageMedia();
+  setExternalBtn.disabled = !canManageMedia();
+  externalUrlInput.disabled = !canManageMedia();
   syncBlobBtn.disabled = !isHost;
 
   clearUploadBtn.classList.toggle("disabled", !canManageMedia());
   setYoutubeBtn.classList.toggle("disabled", !canManageMedia());
+  setExternalBtn.classList.toggle("disabled", !canManageMedia());
   syncBlobBtn.classList.toggle("disabled", !isHost);
 
   renderPlaylist();
@@ -674,24 +853,48 @@ async function applyMedia(media) {
     video.pause();
     video.removeAttribute("src");
     video.load();
+    hideExternalFallback();
+    externalFrame.src = "about:blank";
 
     updateActivePlayerUI();
     videoTitle.textContent = `Now playing: ${currentMedia.title || "YouTube Video"}`;
     renderPlaylist();
-  updateSpeedOptionsForMode();
-  refreshSubtitleOptions();
-  refreshAudioTrackOptions();
+    updateSpeedOptionsForMode();
+    refreshSubtitleOptions();
+    refreshAudioTrackOptions();
 
     try {
       await ensureYouTubePlayer(currentMedia.youtubeId);
     } catch {
       statusText.textContent = "YouTube player failed to initialize.";
     }
+    return;
+  }
+
+  if (currentMedia.type === "external") {
+    currentVideoId = null;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+
+    if (youtubePlayer && youtubeReady) {
+      youtubePlayer.stopVideo?.();
+    }
+
+    updateActivePlayerUI();
+    videoTitle.textContent = `Now playing: ${currentMedia.title || "External URL"}`;
+    renderPlaylist();
+    updateSpeedOptionsForMode();
+    refreshSubtitleOptions();
+    refreshAudioTrackOptions();
+    loadExternalEmbed(currentMedia.url);
+    return;
   }
 }
 
 async function applyRemoteState(payload) {
   if (!currentMedia) return;
+  if (isExternalMode()) return;
   applyingRemote = true;
 
   const targetTime = Number(payload.currentTime) || 0;
@@ -771,6 +974,41 @@ setYoutubeBtn.addEventListener("click", async () => {
   }
 });
 
+externalUrlInput.addEventListener("input", () => {
+  refreshExternalUrlValidation();
+});
+
+externalUrlInput.addEventListener("blur", () => {
+  refreshExternalUrlValidation();
+});
+setExternalBtn.addEventListener("click", async () => {
+  if (!canManageMedia() || !currentRoomId) return;
+  const url = externalUrlInput.value.trim();
+  if (!url) {
+    statusText.textContent = "Paste an external URL.";
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/set-external/${currentRoomId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ socketId: selfId, url }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      statusText.textContent = result.error || "Failed to set external URL.";
+      return;
+    }
+
+    statusText.textContent = insight.quality === "warn" ? "External media set (provider may block embed)." : "External media set for room.";
+  } catch {
+    statusText.textContent = "Failed to set external media.";
+  }
+});
 syncBlobBtn.addEventListener("click", async () => {
   if (!isHost || !currentRoomId) return;
 
@@ -877,7 +1115,7 @@ clearUploadBtn.addEventListener("click", async () => {
 playPauseBtn.addEventListener("click", async () => {
   if (!currentMedia || !isHost) return;
 
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (!youtubePlayer || !youtubeReady) return;
     if (isPlayingNow()) {
       youtubePlayer.pauseVideo?.();
@@ -895,7 +1133,7 @@ playPauseBtn.addEventListener("click", async () => {
 });
 
 muteBtn.addEventListener("click", () => {
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (!youtubePlayer || !youtubeReady) return;
     const muted = youtubePlayer.isMuted?.();
     if (muted) {
@@ -917,7 +1155,7 @@ fullscreenBtn.addEventListener("click", async () => {
   if (document.fullscreenElement) {
     await document.exitFullscreen();
   } else {
-    const target = isYoutubeMode() ? youtubeContainer : video;
+    const target = isYoutubeMode() ? youtubeContainer : isExternalMode() ? externalContainer : video;
     await target.requestFullscreen();
   }
 });
@@ -934,7 +1172,7 @@ speedSelect.addEventListener("change", () => {
 });
 
 subtitleSelect.addEventListener("change", () => {
-  if (isYoutubeMode()) return;
+  if (isYoutubeMode() || isExternalMode()) return;
 
   const tracks = Array.from(video.textTracks || []);
   const selected = subtitleSelect.value;
@@ -945,7 +1183,7 @@ subtitleSelect.addEventListener("change", () => {
 });
 
 audioTrackSelect.addEventListener("change", () => {
-  if (isYoutubeMode()) return;
+  if (isYoutubeMode() || isExternalMode()) return;
 
   const tracks = getAudioTracksList();
   const selectedIndex = Number(audioTrackSelect.value);
@@ -958,7 +1196,7 @@ audioTrackSelect.addEventListener("change", () => {
 volumeRange.addEventListener("input", () => {
   const value = Number(volumeRange.value);
 
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     if (!youtubePlayer || !youtubeReady) return;
     youtubePlayer.setVolume?.(Math.round(value * 100));
     return;
@@ -973,7 +1211,7 @@ seekRange.addEventListener("input", () => {
   if (!duration) return;
   const target = (Number(seekRange.value) / 100) * duration;
 
-  if (isYoutubeMode()) {
+  if (isYoutubeMode() || isExternalMode()) {
     youtubePlayer.seekTo?.(target, true);
   } else {
     video.currentTime = target;
@@ -1151,6 +1389,24 @@ document.addEventListener("visibilitychange", () => {
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

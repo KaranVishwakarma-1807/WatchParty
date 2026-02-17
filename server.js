@@ -164,6 +164,14 @@ function getCurrentMediaPayload(room) {
     };
   }
 
+  if (room.currentMedia.type === "external") {
+    return {
+      type: "external",
+      url: room.currentMedia.url,
+      title: room.currentMedia.title,
+    };
+  }
+
   const video = getCurrentVideo(room);
   if (!video) return null;
 
@@ -313,6 +321,17 @@ async function syncRoomPlaylistFromBlob(roomId, room) {
   resetPlaybackState(room);
 }
 
+function parseExternalUrl(url) {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
 function parseYouTubeVideoId(url) {
   try {
     const parsed = new URL(url);
@@ -472,6 +491,45 @@ app.post("/api/set-youtube/:roomId", async (req, res) => {
   }
 });
 
+app.post("/api/set-external/:roomId", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId(req.params.roomId);
+    const socketId = req.body.socketId;
+    const rawUrl = String(req.body.url || "").trim();
+    const room = rooms.get(roomId);
+
+    if (!room || !socketId || !canManageMedia(room, socketId)) {
+      return res.status(403).json({ error: "Only host or co-host can set external media." });
+    }
+
+    const externalUrl = parseExternalUrl(rawUrl);
+    if (!externalUrl) {
+      return res.status(400).json({ error: "Invalid external URL." });
+    }
+
+    let hostName = "External URL";
+    try {
+      hostName = new URL(externalUrl).hostname.replace(/^www\./, "");
+    } catch {
+      // no-op
+    }
+
+    room.currentMedia = {
+      type: "external",
+      url: externalUrl,
+      title: `External: ${hostName}`,
+    };
+    resetPlaybackState(room);
+
+    emitPlaylistUpdate(roomId, room);
+    emitMediaChanged(roomId, room);
+
+    return res.json({ ok: true, media: getCurrentMediaPayload(room) });
+  } catch (error) {
+    console.error("Set external media failed:", error.message);
+    return res.status(500).json({ error: "Failed to set external media." });
+  }
+});
 app.post("/api/request-upload/:roomId", upload.single("video"), async (req, res) => {
   try {
     ensureAzureReady();
@@ -637,7 +695,7 @@ app.post("/api/clear-upload/:roomId", async (req, res) => {
       return res.json({ ok: true });
     }
 
-    if (room.currentMedia.type === "youtube") {
+    if (room.currentMedia.type === "youtube" || room.currentMedia.type === "external") {
       room.currentMedia = null;
       resetPlaybackState(room);
       emitPlaylistUpdate(roomId, room);
@@ -893,5 +951,7 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
 
 

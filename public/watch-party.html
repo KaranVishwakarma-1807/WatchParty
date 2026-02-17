@@ -35,6 +35,13 @@
         <div id="youtubeContainer" class="youtube-container hidden">
           <div id="youtubePlayer"></div>
         </div>
+        <div id="externalContainer" class="external-container hidden">
+          <iframe id="externalFrame" title="External media" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+          <div id="externalFallback" class="external-fallback hidden">
+            <p>Embedded playback may be blocked by this provider.</p>
+            <a id="externalOpenLink" href="#" target="_blank" rel="noopener noreferrer">Open external page</a>
+          </div>
+        </div>
         <p id="videoTitle" class="video-title">No media selected yet.</p>
 
         <section class="controls">
@@ -91,6 +98,15 @@
             <button id="setYoutubeBtn" type="button">Set YouTube</button>
           </div>
 
+          <div class="external-box">
+            <input id="externalUrlInput" type="text" placeholder="Paste External URL (Host/Co-host)" />
+            <button id="setExternalBtn" type="button">Set External</button>
+          </div>
+          <div class="external-info">
+            <span id="externalProviderBadge" class="external-provider-badge neutral">Provider: -</span>
+            <p id="externalValidationText" class="external-validation neutral">Paste a URL to check provider support.</p>
+          </div>
+
           <button id="syncBlobBtn" class="disabled" type="button" disabled>Sync Playlist from Blob</button>
 
           <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
@@ -126,5 +142,11 @@
   <script src="watch-party.js"></script>
 </body>
 </html>
+
+
+
+
+
+
 
 
