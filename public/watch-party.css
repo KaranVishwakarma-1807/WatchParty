@@ -13,6 +13,17 @@
   box-sizing: border-box;
 }
 
+/* Hide all visible scrollbars while preserving scroll behavior */
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -213,7 +224,10 @@ video,
 }
 
 .side-card {
-  padding: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
 
 h2,
@@ -221,6 +235,38 @@ h3 {
   margin: 0 0 8px;
 }
 
+
+.chat-panel,
+.info-panel {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 340px;
+  max-height: 420px;
+}
+
+.chat-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.chat-panel h2,
+.info-panel h3 {
+  margin: 0 0 8px;
+}
+
+.info-panel {
+  max-height: 480px;
+  overflow-y: auto;
+}
 .upload-box {
   margin: 10px 0 14px;
   display: grid;
@@ -434,8 +480,8 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
-  min-height: 140px;
-  max-height: 220px;
+  min-height: 180px;
+  max-height: 100%;
   overflow-y: auto;
   display: grid;
   gap: 8px;
@@ -467,13 +513,10 @@ h3 {
   .layout {
     grid-template-columns: 1fr;
   }
+
+  .chat-panel,
+  .info-panel {
+    max-height: none;
+  }
 }
-
-
-
-
-
-
-
-
 

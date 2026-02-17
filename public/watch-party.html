@@ -84,55 +84,61 @@
         </section>
       </article>
 
-      <aside class="glass side-card">
-        <h2>Room</h2>
-        <p id="roleText">Role: Viewer</p>
-        <p id="hostText">Host: -</p>
-
-        <div class="upload-box">
-          <label for="uploadInput" id="uploadLabel" class="upload-label">Upload Video (Host Direct)</label>
-          <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
-
-          <div class="youtube-box">
-            <input id="youtubeUrlInput" type="text" placeholder="Paste YouTube URL (Host/Co-host)" />
-            <button id="setYoutubeBtn" type="button">Set YouTube</button>
+            <aside class="glass side-card">
+        <section class="glass chat-panel">
+          <div class="chat-panel-head">
+            <h2>Room Chat</h2>
           </div>
-
-          <div class="external-box">
-            <input id="externalUrlInput" type="text" placeholder="Paste External URL (Host/Co-host)" />
-            <button id="setExternalBtn" type="button">Set External</button>
+          <div id="chatList" class="chat-list"></div>
+          <div class="chat-box">
+            <input id="chatInput" type="text" maxlength="500" placeholder="Type a message" />
+            <button id="sendChatBtn" type="button">Send</button>
           </div>
-          <div class="external-info">
-            <span id="externalProviderBadge" class="external-provider-badge neutral">Provider: -</span>
-            <p id="externalValidationText" class="external-validation neutral">Paste a URL to check provider support.</p>
-          </div>
+        </section>
 
-          <button id="syncBlobBtn" class="disabled" type="button" disabled>Sync Playlist from Blob</button>
+        <section class="glass info-panel">
+          <h3>Room</h3>
+          <p id="roleText">Role: Viewer</p>
+          <p id="hostText">Host: -</p>
 
-          <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
-            <div class="upload-progress-track">
-              <div id="uploadProgressFill" class="upload-progress-fill"></div>
+          <div class="upload-box">
+            <label for="uploadInput" id="uploadLabel" class="upload-label">Upload Video (Host Direct)</label>
+            <input id="uploadInput" class="hidden-upload" type="file" accept="video/*" />
+
+            <div class="youtube-box">
+              <input id="youtubeUrlInput" type="text" placeholder="Paste YouTube URL (Host/Co-host)" />
+              <button id="setYoutubeBtn" type="button">Set YouTube</button>
             </div>
-            <p id="uploadProgressText" class="upload-progress-text">0%</p>
+
+            <div class="external-box">
+              <input id="externalUrlInput" type="text" placeholder="Paste External URL (Host/Co-host)" />
+              <button id="setExternalBtn" type="button">Set External</button>
+            </div>
+            <div class="external-info">
+              <span id="externalProviderBadge" class="external-provider-badge neutral">Provider: -</span>
+              <p id="externalValidationText" class="external-validation neutral">Paste a URL to check provider support.</p>
+            </div>
+
+            <button id="syncBlobBtn" class="disabled" type="button" disabled>Sync Playlist from Blob</button>
+
+            <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
+              <div class="upload-progress-track">
+                <div id="uploadProgressFill" class="upload-progress-fill"></div>
+              </div>
+              <p id="uploadProgressText" class="upload-progress-text">0%</p>
+            </div>
+            <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Current Media</button>
           </div>
-          <button id="clearUploadBtn" class="disabled" type="button" disabled>Clear Current Media</button>
-        </div>
 
-        <h3>Playlist</h3>
-        <ul id="playlistList" class="playlist-list"></ul>
+          <h3>Playlist</h3>
+          <ul id="playlistList" class="playlist-list"></ul>
 
-        <h3>Request Queue</h3>
-        <ul id="requestQueueList" class="request-queue-list"></ul>
+          <h3>Request Queue</h3>
+          <ul id="requestQueueList" class="request-queue-list"></ul>
 
-        <h3>Members</h3>
-        <ul id="memberList" class="member-list"></ul>
-
-        <h3>Chat</h3>
-        <div id="chatList" class="chat-list"></div>
-        <div class="chat-box">
-          <input id="chatInput" type="text" maxlength="500" placeholder="Type a message" />
-          <button id="sendChatBtn" type="button">Send</button>
-        </div>
+          <h3>Members</h3>
+          <ul id="memberList" class="member-list"></ul>
+        </section>
       </aside>
     </section>
   </main>
@@ -142,6 +148,7 @@
   <script src="watch-party.js"></script>
 </body>
 </html>
+
 
 
 
