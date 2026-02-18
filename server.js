@@ -14,6 +14,49 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
+function splitCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseIceServersFromEnv() {
+  const fallbackStun = splitCsv(process.env.STUN_URLS || "stun:stun.l.google.com:19302");
+
+  const jsonRaw = cleanEnvValue(process.env.RTC_ICE_SERVERS_JSON);
+  if (jsonRaw) {
+    try {
+      const parsed = JSON.parse(jsonRaw);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed;
+      }
+    } catch (error) {
+      console.warn("Invalid RTC_ICE_SERVERS_JSON. Falling back to TURN/STUN env.", error.message);
+    }
+  }
+
+  const iceServers = [];
+
+  if (fallbackStun.length) {
+    iceServers.push({ urls: fallbackStun });
+  }
+
+  const turnUrls = splitCsv(process.env.TURN_URLS);
+  const turnUsername = cleanEnvValue(process.env.TURN_USERNAME);
+  const turnCredential = cleanEnvValue(process.env.TURN_CREDENTIAL);
+
+  if (turnUrls.length) {
+    const turnServer = { urls: turnUrls };
+    if (turnUsername) turnServer.username = turnUsername;
+    if (turnCredential) turnServer.credential = turnCredential;
+    iceServers.push(turnServer);
+  }
+
+  return iceServers;
+}
+
+const rtcIceServers = parseIceServersFromEnv();
 
 function cleanEnvValue(value) {
   return String(value || "")
@@ -406,6 +449,11 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "watch-party.html"));
+});
+app.get("/api/rtc-config", (_req, res) => {
+  res.json({
+    iceServers: rtcIceServers,
+  });
 });
 
 app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
@@ -1028,12 +1076,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
-
-
-
-
-
-
-
-
-

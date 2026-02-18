@@ -72,7 +72,10 @@ const peerConnections = new Map();
 const remoteAudioElements = new Map();
 const roomVoiceParticipants = new Set();
 const emojiPalette = [0x1F600, 0x1F602, 0x1F60D, 0x1F973, 0x1F525, 0x1F44F, 0x1F64C, 0x1F44D, 0x2764, 0x1F4AF, 0x1F3AC, 0x1F37F, 0x1F60E, 0x1F92F, 0x1F62D, 0x1F634, 0x1F91D, 0x2728, 0x1F389, 0x1F440, 0x2705, 0x274C, 0x1F916, 0x1F4AC].map((code) => String.fromCodePoint(code));
-const rtcConfig = { iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }] };
+const defaultIceServers = [{ urls: ["stun:stun.l.google.com:19302"] }];
+let rtcConfig = { iceServers: defaultIceServers };
+let rtcConfigLoaded = false;
+let rtcConfigPromise = null;
 
 const providerRules = [
   { host: "youtube.com", label: "YouTube", quality: "good", note: "Known provider. Use Set YouTube for best sync." },
@@ -157,6 +160,47 @@ function refreshExternalUrlValidation() {
   const insight = analyzeExternalUrl(externalUrlInput.value);
   setExternalValidationState(insight.quality, insight.provider, insight.message);
   return insight;
+}
+function normalizeIceServer(rawServer) {
+  if (!rawServer || typeof rawServer !== "object") return null;
+
+  const rawUrls = rawServer.urls;
+  const urls = Array.isArray(rawUrls)
+    ? rawUrls.map((url) => String(url || "").trim()).filter(Boolean)
+    : [String(rawUrls || "").trim()].filter(Boolean);
+
+  if (!urls.length) return null;
+
+  const server = { urls };
+  if (rawServer.username) server.username = String(rawServer.username);
+  if (rawServer.credential) server.credential = String(rawServer.credential);
+  return server;
+}
+
+async function ensureRtcConfigLoaded() {
+  if (rtcConfigLoaded) return;
+
+  if (!rtcConfigPromise) {
+    rtcConfigPromise = (async () => {
+      try {
+        const response = await fetch("/api/rtc-config", { cache: "no-store" });
+        const payload = await response.json();
+
+        if (response.ok && Array.isArray(payload.iceServers)) {
+          const normalized = payload.iceServers.map(normalizeIceServer).filter(Boolean);
+          if (normalized.length) {
+            rtcConfig = { iceServers: normalized };
+          }
+        }
+      } catch {
+        // Keep default STUN fallback.
+      } finally {
+        rtcConfigLoaded = true;
+      }
+    })();
+  }
+
+  await rtcConfigPromise;
 }
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
@@ -368,6 +412,8 @@ async function startOfferToPeer(peerId) {
 
 async function joinVoiceChat() {
   if (voiceJoined || !currentRoomId) return;
+
+  await ensureRtcConfigLoaded();
 
   try {
     localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1707,45 +1753,3 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
