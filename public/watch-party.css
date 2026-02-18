@@ -557,25 +557,38 @@ h3 {
 
 .chat-box {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
   gap: 6px;
   margin-bottom: 0;
   width: 100%;
   flex: 0 0 auto;
 }
 
-#emojiBtn {
+#emojiBtn,
+#sendChatBtn {
   min-width: 40px;
+  width: 40px;
+  padding: 8px 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
+#emojiBtn img,
+#sendChatBtn img {
+  width: 18px;
+  height: 18px;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
 .chat-box input {
   min-width: 0;
   width: 100%;
 }
 
-.chat-box button:last-child {
-  white-space: nowrap;
-}
+
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
