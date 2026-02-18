@@ -61,6 +61,7 @@ function getRoom(roomId) {
       pendingRequests: [],
       currentMedia: null,
       chatMessages: [],
+      voiceParticipants: new Set(),
       state: {
         currentTime: 0,
         isPlaying: false,
@@ -820,6 +821,7 @@ io.on("connection", (socket) => {
       state: syncPayload(room),
       members: getMembersPayload(room),
       chatMessages: chatPayload(room),
+      voiceParticipants: [...room.voiceParticipants],
     });
 
     emitMembersUpdate(normalizedRoomId, room);
@@ -902,6 +904,76 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("room-chat-message", chatItem);
   });
+
+  socket.on("voice-join", () => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.members.has(socket.id)) return;
+
+    room.voiceParticipants.add(socket.id);
+
+    socket.emit("voice-participants", {
+      participants: [...room.voiceParticipants].filter((id) => id !== socket.id),
+    });
+
+    socket.to(roomId).emit("voice-user-joined", {
+      socketId: socket.id,
+      name: room.members.get(socket.id) || socket.data.name || "Guest",
+    });
+  });
+
+  socket.on("voice-leave", () => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    if (room.voiceParticipants.delete(socket.id)) {
+      socket.to(roomId).emit("voice-user-left", { socketId: socket.id });
+    }
+  });
+
+  socket.on("voice-offer", ({ targetId, sdp }) => {
+    const roomId = socket.data.roomId;
+    if (!roomId || !targetId || !sdp) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.voiceParticipants.has(socket.id) || !room.voiceParticipants.has(targetId)) return;
+
+    io.to(targetId).emit("voice-offer", {
+      fromId: socket.id,
+      sdp,
+    });
+  });
+
+  socket.on("voice-answer", ({ targetId, sdp }) => {
+    const roomId = socket.data.roomId;
+    if (!roomId || !targetId || !sdp) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.voiceParticipants.has(socket.id) || !room.voiceParticipants.has(targetId)) return;
+
+    io.to(targetId).emit("voice-answer", {
+      fromId: socket.id,
+      sdp,
+    });
+  });
+
+  socket.on("voice-ice-candidate", ({ targetId, candidate }) => {
+    const roomId = socket.data.roomId;
+    if (!roomId || !targetId || !candidate) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.voiceParticipants.has(socket.id) || !room.voiceParticipants.has(targetId)) return;
+
+    io.to(targetId).emit("voice-ice-candidate", {
+      fromId: socket.id,
+      candidate,
+    });
+  });
+
   socket.on("request-sync", () => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
@@ -918,6 +990,7 @@ io.on("connection", (socket) => {
 
     room.members.delete(socket.id);
     room.coHostIds.delete(socket.id);
+    const leftVoice = room.voiceParticipants.delete(socket.id);
 
     if (room.hostId === socket.id) {
       const [nextHostId] = room.members.keys();
@@ -942,6 +1015,10 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (leftVoice) {
+      socket.to(roomId).emit("voice-user-left", { socketId: socket.id });
+    }
+
     io.to(roomId).emit("host-changed", { hostId: room.hostId });
     emitMembersUpdate(roomId, room);
     emitQueueUpdate(roomId, room);
@@ -951,6 +1028,10 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
+
+
 
 
 
