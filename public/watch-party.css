@@ -245,10 +245,11 @@ h3 {
 }
 
 .chat-panel {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-height: 340px;
   max-height: 420px;
+  overflow: hidden;
 }
 
 .chat-panel-head {
@@ -499,8 +500,8 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
-  min-height: 180px;
-  max-height: 100%;
+  min-height: 120px;
+  flex: 1 1 auto;
   overflow-y: auto;
   display: grid;
   gap: 8px;
@@ -558,8 +559,9 @@ h3 {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
   width: 100%;
+  flex: 0 0 auto;
 }
 
 #emojiBtn {
@@ -592,6 +594,3 @@ h3 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
-
-
-
