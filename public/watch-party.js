@@ -332,10 +332,19 @@ function createPeerConnection(peerId) {
       audio = document.createElement("audio");
       audio.autoplay = true;
       audio.playsInline = true;
+      audio.controls = false;
       remoteAudioElements.set(peerId, audio);
       document.body.appendChild(audio);
     }
     audio.srcObject = event.streams[0] || null;
+    const playPromise = audio.play?.();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {
+        audio.oncanplay = () => {
+          audio.play?.().catch(() => {});
+        };
+      });
+    }
   };
 
   peerConnections.set(peerId, pc);
@@ -1599,11 +1608,6 @@ socket.on("voice-participants", ({ participants }) => {
 
   if (voiceJoined) {
     roomVoiceParticipants.add(selfId);
-    participants?.forEach((participantId) => {
-      if (participantId !== selfId) {
-        void startOfferToPeer(participantId);
-      }
-    });
   }
 
   updateVoiceStatus();
@@ -1703,6 +1707,9 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
 
 
 

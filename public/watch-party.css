@@ -253,8 +253,10 @@ h3 {
 
 .chat-panel-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
@@ -554,13 +556,23 @@ h3 {
 
 .chat-box {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 6px;
   margin-bottom: 10px;
+  width: 100%;
 }
 
 #emojiBtn {
   min-width: 40px;
+}
+
+.chat-box input {
+  min-width: 0;
+  width: 100%;
+}
+
+.chat-box button:last-child {
+  white-space: nowrap;
 }
 @media (max-width: 960px) {
   .layout {
@@ -580,3 +592,6 @@ h3 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
+
+
+
