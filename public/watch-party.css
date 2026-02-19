@@ -599,6 +599,16 @@ h3 {
 
 
 @media (max-width: 960px) {
+  .cam-dock {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .cam-tile {
+    width: 170px;
+    min-width: 130px;
+    min-height: 96px;
+  }
   .layout {
     grid-template-columns: 1fr;
   }
@@ -629,4 +639,63 @@ h3 {
 }
 
 
+
+
+.cam-dock {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 40;
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.cam-tile {
+  width: 220px;
+  min-width: 150px;
+  min-height: 110px;
+  resize: both;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(7, 13, 31, 0.86);
+  box-shadow: 0 12px 28px rgba(3, 8, 24, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.cam-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #c9d8f5;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: move;
+  user-select: none;
+}
+
+.cam-tile video {
+  width: 100%;
+  height: calc(100% - 30px);
+  aspect-ratio: auto;
+  border-radius: 0;
+  object-fit: cover;
+  background: #000;
+}
+
+.cam-empty {
+  display: grid;
+  place-items: center;
+  height: calc(100% - 30px);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
 

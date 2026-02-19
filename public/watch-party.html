@@ -92,6 +92,7 @@
               <button id="joinVoiceBtn" type="button">Join Voice</button>
               <button id="muteVoiceBtn" class="disabled" type="button" disabled>Mute Mic</button>
               <button id="leaveVoiceBtn" class="disabled" type="button" disabled>Leave Voice</button>
+              <button id="toggleVideoBtn" class="disabled" type="button" disabled>Enable Cam</button>
             </div>
           </div>
           <p id="voiceStatus" class="voice-status">Voice: Off</p>
@@ -151,8 +152,11 @@
     </section>
   </main>
 
+
+  <section id="camDock" class="cam-dock hidden" aria-label="Video call windows"></section>
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="watch-party.js"></script>
 </body>
 </html>
+

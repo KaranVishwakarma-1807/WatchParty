@@ -47,7 +47,9 @@ const emojiPicker = document.getElementById("emojiPicker");
 const joinVoiceBtn = document.getElementById("joinVoiceBtn");
 const muteVoiceBtn = document.getElementById("muteVoiceBtn");
 const leaveVoiceBtn = document.getElementById("leaveVoiceBtn");
+const toggleVideoBtn = document.getElementById("toggleVideoBtn");
 const voiceStatus = document.getElementById("voiceStatus");
+const camDock = document.getElementById("camDock");
 
 let currentRoomId = "";
 let currentHostId = "";
@@ -71,11 +73,19 @@ let voiceJoined = false;
 const peerConnections = new Map();
 const remoteAudioElements = new Map();
 const roomVoiceParticipants = new Set();
+const remoteVideoTiles = new Map();
+let localVideoTile = null;
+let localVideoEnabled = false;
 const emojiPalette = [0x1F600, 0x1F602, 0x1F60D, 0x1F973, 0x1F525, 0x1F44F, 0x1F64C, 0x1F44D, 0x2764, 0x1F4AF, 0x1F3AC, 0x1F37F, 0x1F60E, 0x1F92F, 0x1F62D, 0x1F634, 0x1F91D, 0x2728, 0x1F389, 0x1F440, 0x2705, 0x274C, 0x1F916, 0x1F4AC].map((code) => String.fromCodePoint(code));
 const defaultIceServers = [{ urls: ["stun:stun.l.google.com:19302"] }];
 let rtcConfig = { iceServers: defaultIceServers };
 let rtcConfigLoaded = false;
 let rtcConfigPromise = null;
+const videoConstraints = {
+  width: { ideal: 640, max: 640 },
+  height: { ideal: 360, max: 360 },
+  frameRate: { ideal: 15, max: 15 },
+};
 
 const providerRules = [
   { host: "youtube.com", label: "YouTube", quality: "good", note: "Known provider. Use Set YouTube for best sync." },
@@ -251,10 +261,14 @@ function setVoiceButtonsState() {
   joinVoiceBtn.disabled = !currentRoomId || voiceJoined;
   muteVoiceBtn.disabled = !voiceJoined;
   leaveVoiceBtn.disabled = !voiceJoined;
+  toggleVideoBtn.disabled = !voiceJoined;
 
   joinVoiceBtn.classList.toggle("disabled", joinVoiceBtn.disabled);
   muteVoiceBtn.classList.toggle("disabled", muteVoiceBtn.disabled);
   leaveVoiceBtn.classList.toggle("disabled", leaveVoiceBtn.disabled);
+  toggleVideoBtn.classList.toggle("disabled", toggleVideoBtn.disabled);
+
+  toggleVideoBtn.textContent = localVideoEnabled ? "Disable Cam" : "Enable Cam";
 }
 
 function updateVoiceStatus() {
@@ -265,7 +279,168 @@ function updateVoiceStatus() {
 
   const peerCount = Math.max(0, roomVoiceParticipants.size - 1);
   const muteLabel = voiceMuted ? "Muted" : "Live";
-  voiceStatus.textContent = `Voice: ${muteLabel} (${peerCount} peer${peerCount === 1 ? "" : "s"})`;
+  const camLabel = localVideoEnabled ? "Cam On" : "Cam Off";
+  voiceStatus.textContent = `Voice: ${muteLabel} (${peerCount} peer${peerCount === 1 ? "" : "s"}) | ${camLabel}`;
+}
+
+function syncCamDockVisibility() {
+  const hasLocalVideo = Boolean(localVideoTile && !localVideoTile.video.classList.contains("hidden"));
+  const hasRemoteVideo = [...remoteVideoTiles.values()].some((tile) => !tile.video.classList.contains("hidden"));
+  camDock.classList.toggle("hidden", !(hasLocalVideo || hasRemoteVideo));
+}
+
+function attachTileDrag(tile, handle) {
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  handle.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    startX = event.clientX;
+    startY = event.clientY;
+    startLeft = tile.offsetLeft;
+    startTop = tile.offsetTop;
+    handle.setPointerCapture(event.pointerId);
+  });
+
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    const nextLeft = startLeft + (event.clientX - startX);
+    const nextTop = startTop + (event.clientY - startY);
+    tile.style.left = `${Math.max(0, nextLeft)}px`;
+    tile.style.top = `${Math.max(0, nextTop)}px`;
+  });
+
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    if (handle.hasPointerCapture?.(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  handle.addEventListener("pointerup", stopDrag);
+  handle.addEventListener("pointercancel", stopDrag);
+}
+
+function createCamTile(labelText, xOffset = 0, yOffset = 0) {
+  const tile = document.createElement("div");
+  tile.className = "cam-tile";
+  tile.style.left = `${xOffset}px`;
+  tile.style.top = `${yOffset}px`;
+
+  const head = document.createElement("div");
+  head.className = "cam-tile-head";
+  head.textContent = labelText;
+
+  const videoEl = document.createElement("video");
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+  videoEl.classList.add("hidden");
+
+  const empty = document.createElement("div");
+  empty.className = "cam-empty";
+  empty.textContent = "Camera off";
+
+  tile.appendChild(head);
+  tile.appendChild(videoEl);
+  tile.appendChild(empty);
+  camDock.appendChild(tile);
+  attachTileDrag(tile, head);
+
+  return {
+    tile,
+    head,
+    video: videoEl,
+    empty,
+  };
+}
+
+function ensureLocalVideoTile() {
+  if (localVideoTile) return localVideoTile;
+  localVideoTile = createCamTile("You", 0, 0);
+  localVideoTile.video.muted = true;
+  return localVideoTile;
+}
+
+function updateTileVideoVisibility(tileRef, hasVideo) {
+  tileRef.video.classList.toggle("hidden", !hasVideo);
+  tileRef.empty.classList.toggle("hidden", hasVideo);
+}
+
+function ensureRemoteVideoTile(peerId) {
+  if (remoteVideoTiles.has(peerId)) return remoteVideoTiles.get(peerId);
+  const tile = createCamTile(`Peer ${peerId.slice(0, 4)}`, 0, 24 + remoteVideoTiles.size * 26);
+  remoteVideoTiles.set(peerId, tile);
+  return tile;
+}
+
+async function renegotiateAllPeers() {
+  const peerIds = [...roomVoiceParticipants].filter((id) => id && id !== selfId);
+  for (const peerId of peerIds) {
+    cleanupPeerConnection(peerId);
+    await startOfferToPeer(peerId);
+  }
+}
+
+async function enableLocalVideo() {
+  if (!voiceJoined || !localVoiceStream) return;
+
+  try {
+    const videoOnlyStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+    const newVideoTrack = videoOnlyStream.getVideoTracks()[0];
+    if (!newVideoTrack) return;
+
+    localVoiceStream.getVideoTracks().forEach((track) => {
+      track.stop();
+      localVoiceStream.removeTrack(track);
+    });
+
+    localVoiceStream.addTrack(newVideoTrack);
+    localVideoEnabled = true;
+
+    const localTile = ensureLocalVideoTile();
+    localTile.video.srcObject = localVoiceStream;
+    updateTileVideoVisibility(localTile, true);
+    syncCamDockVisibility();
+    setVoiceButtonsState();
+    updateVoiceStatus();
+
+    await renegotiateAllPeers();
+  } catch {
+    statusText.textContent = "Camera enable failed. Check camera permission.";
+  }
+}
+
+async function disableLocalVideo() {
+  if (!localVoiceStream) return;
+
+  localVoiceStream.getVideoTracks().forEach((track) => {
+    track.stop();
+    localVoiceStream.removeTrack(track);
+  });
+
+  localVideoEnabled = false;
+
+  if (localVideoTile) {
+    updateTileVideoVisibility(localVideoTile, false);
+  }
+
+  syncCamDockVisibility();
+  setVoiceButtonsState();
+  updateVoiceStatus();
+  await renegotiateAllPeers();
+}
+
+async function toggleLocalVideo() {
+  if (!voiceJoined) return;
+  if (localVideoEnabled) {
+    await disableLocalVideo();
+  } else {
+    await enableLocalVideo();
+  }
 }
 
 function renderEmojiPicker() {
@@ -287,7 +462,6 @@ function renderEmojiPicker() {
     emojiPicker.appendChild(button);
   });
 }
-
 function renderChatMessages() {
   chatList.innerHTML = "";
 
@@ -338,6 +512,16 @@ function removeRemoteAudio(peerId) {
   remoteAudioElements.delete(peerId);
 }
 
+function removeRemoteVideoTile(peerId) {
+  const tileRef = remoteVideoTiles.get(peerId);
+  if (!tileRef) return;
+  tileRef.video.pause();
+  tileRef.video.srcObject = null;
+  tileRef.tile.remove();
+  remoteVideoTiles.delete(peerId);
+  syncCamDockVisibility();
+}
+
 function cleanupPeerConnection(peerId) {
   const pc = peerConnections.get(peerId);
   if (pc) {
@@ -347,6 +531,7 @@ function cleanupPeerConnection(peerId) {
     peerConnections.delete(peerId);
   }
   removeRemoteAudio(peerId);
+  removeRemoteVideoTile(peerId);
 }
 
 function createPeerConnection(peerId) {
@@ -371,6 +556,9 @@ function createPeerConnection(peerId) {
   };
 
   pc.ontrack = (event) => {
+    const stream = event.streams[0] || null;
+    if (!stream) return;
+
     let audio = remoteAudioElements.get(peerId);
     if (!audio) {
       audio = document.createElement("audio");
@@ -380,7 +568,8 @@ function createPeerConnection(peerId) {
       remoteAudioElements.set(peerId, audio);
       document.body.appendChild(audio);
     }
-    audio.srcObject = event.streams[0] || null;
+
+    audio.srcObject = stream;
     const playPromise = audio.play?.();
     if (playPromise && typeof playPromise.catch === "function") {
       playPromise.catch(() => {
@@ -389,6 +578,12 @@ function createPeerConnection(peerId) {
         };
       });
     }
+
+    const tileRef = ensureRemoteVideoTile(peerId);
+    tileRef.video.srcObject = stream;
+    const hasVideo = (stream.getVideoTracks?.().length || 0) > 0;
+    updateTileVideoVisibility(tileRef, hasVideo);
+    syncCamDockVisibility();
   };
 
   peerConnections.set(peerId, pc);
@@ -453,12 +648,28 @@ function leaveVoiceChat(notifyServer = true) {
     localVoiceStream = null;
   }
 
+  if (localVideoTile) {
+    localVideoTile.video.pause();
+    localVideoTile.video.srcObject = null;
+    localVideoTile.tile.remove();
+    localVideoTile = null;
+  }
+
+  remoteVideoTiles.forEach((tileRef) => {
+    tileRef.video.pause();
+    tileRef.video.srcObject = null;
+    tileRef.tile.remove();
+  });
+  remoteVideoTiles.clear();
+
   roomVoiceParticipants.clear();
   voiceJoined = false;
   voiceMuted = false;
+  localVideoEnabled = false;
   muteVoiceBtn.textContent = "Mute Mic";
   setVoiceButtonsState();
   updateVoiceStatus();
+  syncCamDockVisibility();
 }
 
 function toggleVoiceMute() {
@@ -1467,6 +1678,9 @@ emojiBtn.addEventListener("click", () => {
 joinVoiceBtn.addEventListener("click", joinVoiceChat);
 muteVoiceBtn.addEventListener("click", toggleVoiceMute);
 leaveVoiceBtn.addEventListener("click", () => leaveVoiceChat(true));
+toggleVideoBtn.addEventListener("click", () => {
+  void toggleLocalVideo();
+});
 
 document.addEventListener("click", (event) => {
   if (emojiPicker.classList.contains("hidden")) return;
@@ -1737,15 +1951,6 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-
-
-
-
-
-
-
-
-
 renderEmojiPicker();
 setVoiceButtonsState();
 updateVoiceStatus();
@@ -1753,3 +1958,4 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
