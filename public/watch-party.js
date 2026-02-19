@@ -328,8 +328,10 @@ function attachTileDrag(tile, handle) {
 function createCamTile(labelText, xOffset = 0, yOffset = 0) {
   const tile = document.createElement("div");
   tile.className = "cam-tile";
-  tile.style.left = `${xOffset}px`;
-  tile.style.top = `${yOffset}px`;
+  const spawnX = Math.max(12, window.innerWidth - 260 - xOffset);
+  const spawnY = Math.max(12, window.innerHeight - 180 - yOffset);
+  tile.style.left = `${spawnX}px`;
+  tile.style.top = `${spawnY}px`;
 
   const head = document.createElement("div");
   head.className = "cam-tile-head";
@@ -372,7 +374,7 @@ function updateTileVideoVisibility(tileRef, hasVideo) {
 
 function ensureRemoteVideoTile(peerId) {
   if (remoteVideoTiles.has(peerId)) return remoteVideoTiles.get(peerId);
-  const tile = createCamTile(`Peer ${peerId.slice(0, 4)}`, 0, 24 + remoteVideoTiles.size * 26);
+  const tile = createCamTile(`Peer ${peerId.slice(0, 4)}`, 0, remoteVideoTiles.size * 30);
   remoteVideoTiles.set(peerId, tile);
   return tile;
 }
@@ -438,13 +440,17 @@ async function enableLocalVideo() {
     const localTile = ensureLocalVideoTile();
     localTile.video.srcObject = localVoiceStream;
     updateTileVideoVisibility(localTile, true);
+    const localPlayPromise = localTile.video.play?.();
+    if (localPlayPromise && typeof localPlayPromise.catch === "function") {
+      localPlayPromise.catch(() => {});
+    }
     syncCamDockVisibility();
     setVoiceButtonsState();
     updateVoiceStatus();
 
     await renegotiateAllPeers();
-  } catch {
-    statusText.textContent = "Camera enable failed. Check camera permission.";
+  } catch (error) {
+    statusText.textContent = `Camera enable failed: ${error?.message || "Check camera permission."}`;
   }
 }
 
@@ -2000,6 +2006,10 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
+
 
 
 

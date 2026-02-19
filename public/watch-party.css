@@ -170,7 +170,7 @@ video,
 }
 
 .external-fallback {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(6, 10, 24, 0.88);
   display: grid;
@@ -302,7 +302,7 @@ h3 {
 }
 
 .hidden-upload {
-  position: absolute;
+  position: fixed;
   width: 1px;
   height: 1px;
   padding: 0;
@@ -664,7 +664,7 @@ h3 {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: auto;
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
 }
@@ -698,4 +698,5 @@ h3 {
   color: var(--muted);
   font-size: 0.8rem;
 }
+
 
