@@ -377,11 +377,45 @@ function ensureRemoteVideoTile(peerId) {
   return tile;
 }
 
+function syncLocalTracksToPeer(pc) {
+  if (!pc || !localVoiceStream) return;
+
+  const localTracks = localVoiceStream.getTracks();
+  const senders = pc.getSenders();
+
+  senders.forEach((sender) => {
+    const senderTrackId = sender.track?.id;
+    if (!senderTrackId) return;
+    const stillExists = localTracks.some((track) => track.id === senderTrackId);
+    if (!stillExists) {
+      try {
+        pc.removeTrack(sender);
+      } catch {
+        // ignore removeTrack races
+      }
+    }
+  });
+
+  localTracks.forEach((track) => {
+    const alreadySending = pc.getSenders().some((sender) => sender.track?.id === track.id);
+    if (!alreadySending) {
+      pc.addTrack(track, localVoiceStream);
+    }
+  });
+}
+
 async function renegotiateAllPeers() {
   const peerIds = [...roomVoiceParticipants].filter((id) => id && id !== selfId);
   for (const peerId of peerIds) {
-    cleanupPeerConnection(peerId);
-    await startOfferToPeer(peerId);
+    const pc = createPeerConnection(peerId);
+    syncLocalTracksToPeer(pc);
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit("voice-offer", {
+      targetId: peerId,
+      sdp: offer,
+    });
   }
 }
 
@@ -581,8 +615,15 @@ function createPeerConnection(peerId) {
 
     const tileRef = ensureRemoteVideoTile(peerId);
     tileRef.video.srcObject = stream;
+    tileRef.video.muted = true;
     const hasVideo = (stream.getVideoTracks?.().length || 0) > 0;
     updateTileVideoVisibility(tileRef, hasVideo);
+    if (hasVideo) {
+      const videoPlayPromise = tileRef.video.play?.();
+      if (videoPlayPromise && typeof videoPlayPromise.catch === "function") {
+        videoPlayPromise.catch(() => {});
+      }
+    }
     syncCamDockVisibility();
   };
 
@@ -687,6 +728,7 @@ async function handleVoiceOffer({ fromId, sdp }) {
 
   try {
     const pc = createPeerConnection(fromId);
+    syncLocalTracksToPeer(pc);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
@@ -1958,4 +2000,9 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
+
+
 
