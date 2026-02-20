@@ -1,49 +1,55 @@
 # WatchParty
 
-A real-time watch-party web app where friends join a shared room and watch media in sync.
+WatchParty is a real-time web app to watch videos together with synchronized playback, room chat, voice/video call, and Azure Blob-backed media playlists.
 
-## Current Features
+## v2.0 Highlights
 
-### Real-time Watch Rooms
-- Join with `roomId` and display name.
-- First member becomes host automatically.
-- Host playback is synchronized for all viewers via Socket.IO.
-- Host handover occurs automatically on disconnect.
+- Persistent accounts (register/login/logout)
+- Profile management (display name update)
+- My Rooms tracking (recent joined rooms)
+- Watch History tracking (media viewed per account)
+- Saved Playlists per room/user
+- Existing watch-party stack kept intact: room sync, playlist moderation, YouTube/external media, voice/video, chat
 
-### Roles and Permissions
-- Roles: `host`, `co-host`, `viewer`.
-- Host can promote/demote members to co-host.
-- Co-host can:
-  - Approve/reject viewer upload requests.
-  - Manage playlist selection/deletion.
-  - Set YouTube media.
-  - Clear current media.
+## Core Features
 
-### Media and Playlist
-- Host direct upload to Azure Blob Storage.
-- Viewer request-to-add workflow (host/co-host moderation).
-- Host-only `Sync Playlist from Blob` action to refresh playlist without rejoining.
-- Playlist supports selecting active item and deleting specific items.
-- Host/co-host can clear currently active media.
-- YouTube link playback mode with room sync.
+### Rooms and Sync
+- Join by `roomId` + name
+- Host auto-assignment and host handover
+- Real-time sync via Socket.IO: play, pause, seek, periodic state sync
 
-### Player Controls
-- Play/Pause
-- Seek
-- Mute/Unmute
-- Volume slider
-- Fullscreen
+### Roles
+- `host`, `co-host`, `viewer`
+- Host can promote/demote co-host
+- Co-host can approve/reject queue, manage playlist, set YouTube/external, clear media
 
-### Upload UX
-- Upload progress bar with percentage text.
-- Progress for both host upload and viewer request upload.
+### Media
+- Host direct upload to Azure Blob
+- Viewer upload requests with moderation queue
+- Manual blob sync button (`Sync Playlist from Blob`)
+- Playlist select/delete + clear current media
+- YouTube + external URL mode
+
+### Communication
+- Room text chat with emoji picker
+- Voice chat (WebRTC)
+- Camera toggle with draggable/resizable cam tiles
+
+### Accounts and Personal Library (v2)
+- Register/login/logout using token auth
+- Profile display name updates
+- Personal dashboard:
+  - My Rooms
+  - Watch History
+  - Saved Playlists snapshot by room
 
 ## Tech Stack
-- Backend: Node.js, Express, Socket.IO
-- Frontend: Vanilla HTML/CSS/JS
-- Upload handling: Multer (`memoryStorage`)
-- Storage: Azure Blob Storage (`@azure/storage-blob`)
-- Config: `dotenv`
+- Node.js + Express
+- Socket.IO
+- Vanilla HTML/CSS/JS
+- Azure Blob Storage (`@azure/storage-blob`)
+- Multer memory upload
+- Local JSON account store for persistent auth metadata (`data/app-data.json`)
 
 ## Project Structure
 
@@ -51,31 +57,45 @@ A real-time watch-party web app where friends join a shared room and watch media
 WatchParty/
   server.js
   package.json
+  package-lock.json
   README.md
   CHANGELOG.md
+  data/
+    app-data.json                # created at runtime
+  server/
+    src/
+      modules/
+        accountStore.js          # v2 account + personal library store
   public/
     watch-party.html
     watch-party.css
     watch-party.js
+    assets/
 ```
 
 ## Environment Variables
-
-Use local `.env` and Azure App Service Application Settings:
 
 ```env
 PORT=3000
 SAS_TOKEN=...
 ACCOUNT_NAME=...
 CONTAINER_NAME=...
+
+# Optional
+APP_DATA_FILE=./data/app-data.json
+RTC_ICE_SERVERS_JSON=[...]
+STUN_URLS=stun:stun.l.google.com:19302
+TURN_URLS=...
+TURN_USERNAME=...
+TURN_CREDENTIAL=...
 ```
 
-Supported aliases:
+Aliases supported for Azure:
 - `AZURE_STORAGE_SAS_TOKEN`
 - `AZURE_STORAGE_ACCOUNT_NAME`
 - `AZURE_STORAGE_CONTAINER_NAME`
 
-## Run Locally
+## Run
 
 ```bash
 npm install
@@ -84,74 +104,61 @@ npm start
 
 Open: `http://localhost:3000`
 
-## API Endpoints
+## API Summary
 
-- `POST /api/upload/:roomId` - host direct upload
-- `POST /api/request-upload/:roomId` - viewer upload request
-- `POST /api/request-action/:roomId` - approve/reject request (host/co-host)
-- `POST /api/select-video/:roomId` - select playlist media (host/co-host)
-- `POST /api/delete-video/:roomId` - delete playlist item (host/co-host)
-- `POST /api/set-youtube/:roomId` - set YouTube media (host/co-host)
-- `POST /api/clear-upload/:roomId` - clear current media (host/co-host)
-- `POST /api/sync-playlist/:roomId` - manual blob refresh (host only)
-- `POST /api/member-role/:roomId` - promote/demote co-host (host only)
+### Auth / Account (v2)
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `POST /api/auth/profile`
+- `GET /api/account/dashboard`
+- `POST /api/account/rooms/touch`
+- `POST /api/account/history/touch`
+- `POST /api/account/saved-playlists/:roomId`
+- `GET /api/account/saved-playlists/:roomId`
+
+### Media / Room APIs
+- `POST /api/upload/:roomId`
+- `POST /api/request-upload/:roomId`
+- `POST /api/request-action/:roomId`
+- `POST /api/select-video/:roomId`
+- `POST /api/delete-video/:roomId`
+- `POST /api/set-youtube/:roomId`
+- `POST /api/set-external/:roomId`
+- `POST /api/clear-upload/:roomId`
+- `POST /api/sync-playlist/:roomId`
+- `POST /api/member-role/:roomId`
 
 ## Socket Events
 
 Client -> Server:
 - `join-room`
-- `host-play`
-- `host-pause`
-- `host-seek`
-- `host-state`
+- `host-play`, `host-pause`, `host-seek`, `host-state`
+- `chat-message`
+- `voice-join`, `voice-leave`
+- `voice-offer`, `voice-answer`, `voice-ice-candidate`
 - `request-sync`
 
 Server -> Client:
-- `room-state`
-- `playlist-updated`
-- `queue-updated`
-- `room-media-changed`
-- `room-media-cleared`
+- `room-state`, `playlist-updated`, `queue-updated`
+- `room-media-changed`, `room-media-cleared`
 - `sync-state`
-- `room-members`
-- `host-changed`
+- `room-members`, `host-changed`
+- `room-chat-message`
+- `voice-participants`, `voice-user-joined`, `voice-user-left`
+- `voice-offer`, `voice-answer`, `voice-ice-candidate`
 
-## Known Limitations
-- Room state is in-memory (resets on server restart).
-- No auth/user accounts yet.
-- No persistent metadata DB yet.
-
-## Future Roadmap
-
-### v1.2
-- Real-time room chat and message history.
-- Reaction system and typing indicators.
-- Better reconnect/resync behavior.
-
-### v2.0
-- Authentication + custom room system (private/public, invite links, room settings).
-- Persistent metadata store (recommended: PostgreSQL).
-
-### v2.1+
-- WebRTC voice/video call integration.
-- Horizontal scaling with Redis adapter.
-- Optional transcoding/HLS pipeline for larger files.
-
-## Versioning (GitHub)
-Use semantic versioning:
-- Patch: `v1.1.1` (bug fixes)
-- Minor: `v1.2.0` (new backward-compatible features)
-- Major: `v2.0.0` (breaking changes)
-
-Release commands:
+## GitHub v2 Release Workflow
 
 ```bash
-git checkout -b release/v1.1.0
+git checkout -b release/v2.0.0
 git add .
-git commit -m "release: v1.1.0 co-host + blob sync"
-git push -u origin release/v1.1.0
-git tag -a v1.1.0 -m "WatchParty v1.1.0"
-git push origin v1.1.0
+git commit -m "release: v2.0.0 persistent accounts + personal library"
+git push -u origin release/v2.0.0
+git tag -a v2.0.0 -m "WatchParty v2.0.0"
+git push origin v2.0.0
 ```
 
-Then create a GitHub Release from `v1.1.0`.
+Then publish a GitHub Release using tag `v2.0.0` and include notes from `CHANGELOG.md`.
+
