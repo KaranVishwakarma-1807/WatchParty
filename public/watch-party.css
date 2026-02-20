@@ -109,6 +109,13 @@ h1 {
   color: var(--muted);
 }
 
+.join-participants {
+  margin: 0 0 2px auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+  align-self: end;
+}
+
 input,
 select,
 button {
@@ -698,5 +705,4 @@ h3 {
   color: var(--muted);
   font-size: 0.8rem;
 }
-
 

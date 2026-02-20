@@ -3,6 +3,7 @@ const socket = io();
 const roomInput = document.getElementById("roomInput");
 const nameInput = document.getElementById("nameInput");
 const joinBtn = document.getElementById("joinBtn");
+const joinParticipantsText = document.getElementById("joinParticipantsText");
 const statusText = document.getElementById("statusText");
 const roleText = document.getElementById("roleText");
 const hostText = document.getElementById("hostText");
@@ -1241,7 +1242,13 @@ function updateRoleUI() {
   renderMembers();
 }
 
+function updateJoinParticipantsCount() {
+  const total = Array.isArray(currentMembers) ? currentMembers.length : 0;
+  joinParticipantsText.textContent = `Participants: ${total}`;
+}
+
 function renderMembers() {
+  updateJoinParticipantsCount();
   memberList.innerHTML = "";
 
   currentMembers.forEach((member) => {
@@ -1988,6 +1995,8 @@ socket.on("sync-state", async (payload) => {
 });
 socket.on("disconnect", () => {
   leaveVoiceChat(false);
+  currentMembers = [];
+  updateJoinParticipantsCount();
 });
 
 document.addEventListener("beforeunload", () => {
@@ -2000,19 +2009,11 @@ document.addEventListener("visibilitychange", () => {
 });
 
 renderEmojiPicker();
+updateJoinParticipantsCount();
 setVoiceButtonsState();
 updateVoiceStatus();
 refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
-
-
-
-
-
-
-
-
-
 
