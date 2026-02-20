@@ -30,6 +30,48 @@
       <p id="joinParticipantsText" class="join-participants">Participants: 0</p>
     </section>
 
+
+    <section class="glass account-card">
+      <h3>Account (v2)</h3>
+      <div class="account-grid">
+        <label>
+          Username
+          <input id="authUsernameInput" type="text" placeholder="kookiee" />
+        </label>
+        <label>
+          Password
+          <input id="authPasswordInput" type="password" placeholder="******" />
+        </label>
+        <label>
+          Display Name
+          <input id="authDisplayNameInput" type="text" placeholder="Kookiee" />
+        </label>
+      </div>
+      <div class="account-actions">
+        <button id="registerBtn" type="button">Register</button>
+        <button id="loginBtn" type="button">Login</button>
+        <button id="logoutBtn" class="disabled" type="button" disabled>Logout</button>
+        <button id="updateProfileBtn" class="disabled" type="button" disabled>Update Profile</button>
+        <button id="refreshAccountBtn" class="disabled" type="button" disabled>Refresh My Data</button>
+      </div>
+      <p id="authStatusText" class="auth-status">Not logged in.</p>
+      <p id="authProfileText" class="auth-profile">Profile: -</p>
+    </section>
+
+    <section class="glass personal-data-card">
+      <div class="personal-data-head">
+        <h3>My Rooms</h3>
+        <button id="savePlaylistSnapshotBtn" class="disabled" type="button" disabled>Save Current Room Playlist</button>
+      </div>
+      <ul id="myRoomsList" class="compact-list"></ul>
+
+      <h3>Watch History</h3>
+      <ul id="watchHistoryList" class="compact-list"></ul>
+
+      <h3>Saved Playlists</h3>
+      <ul id="savedPlaylistsList" class="compact-list"></ul>
+    </section>
+
     <section class="layout">
       <article class="glass player-card">
         <video id="videoPlayer" playsinline></video>

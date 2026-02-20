@@ -1,6 +1,34 @@
 # Changelog
 All notable changes to this project are documented in this file.
 
+## [2.0.0] - 2026-02-21
+### Added
+- Persistent account system with local JSON-backed storage (`server/src/modules/accountStore.js`).
+- Auth APIs:
+  - `POST /api/auth/register`
+  - `POST /api/auth/login`
+  - `POST /api/auth/logout`
+  - `GET /api/auth/me`
+  - `POST /api/auth/profile`
+- Personal account APIs:
+  - `GET /api/account/dashboard`
+  - `POST /api/account/rooms/touch`
+  - `POST /api/account/history/touch`
+  - `POST /api/account/saved-playlists/:roomId`
+  - `GET /api/account/saved-playlists/:roomId`
+- New v2 frontend account sections:
+  - Register/login/logout UI
+  - Profile status and update
+  - My Rooms list
+  - Watch History list
+  - Saved Playlists list + save current room playlist action
+- Account-aware room join payload now includes auth token.
+
+### Changed
+- Project version bumped to `2.0.0` in `package.json` and `package-lock.json`.
+- README updated for v2 architecture, APIs, and release workflow.
+- Frontend now records room and watch activity into authenticated personal dashboard.
+
 ## [1.1.0] - 2026-02-14
 ### Added
 - Host-only manual playlist refresh from Azure Blob (`/api/sync-playlist/:roomId`) and UI button.
@@ -29,3 +57,4 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - Initial README for v1 architecture, API, roadmap, and release workflow.
+

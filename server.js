@@ -6,6 +6,19 @@ const multer = require("multer");
 const { Server } = require("socket.io");
 const dotenv = require("dotenv");
 const { BlobServiceClient } = require("@azure/storage-blob");
+const {
+  registerUser,
+  loginUser,
+  logout,
+  getUserByToken,
+  updateProfile,
+  touchRoom,
+  addWatchHistory,
+  saveRoomPlaylist,
+  getSavedPlaylist,
+  getDashboard,
+  resolveAuthTokenFromRequest,
+} = require("./server/src/modules/accountStore");
 
 dotenv.config({ path: path.join(__dirname, ".env"), override: true });
 
@@ -454,6 +467,147 @@ app.get("/api/rtc-config", (_req, res) => {
   res.json({
     iceServers: rtcIceServers,
   });
+});
+
+function getAuthedUserFromRequest(req) {
+  const authToken = resolveAuthTokenFromRequest(req);
+  const user = getUserByToken(authToken);
+  return { authToken, user };
+}
+
+app.post("/api/auth/register", (req, res) => {
+  try {
+    const username = String(req.body?.username || "");
+    const password = String(req.body?.password || "");
+    const displayName = String(req.body?.displayName || "");
+
+    const result = registerUser({ username, password, displayName });
+    return res.json({ ok: true, token: result.token, user: result.user });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Registration failed." });
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  try {
+    const username = String(req.body?.username || "");
+    const password = String(req.body?.password || "");
+
+    const result = loginUser({ username, password });
+    return res.json({ ok: true, token: result.token, user: result.user });
+  } catch (error) {
+    return res.status(401).json({ error: error.message || "Login failed." });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  const { authToken } = getAuthedUserFromRequest(req);
+  if (authToken) {
+    logout(authToken);
+  }
+  return res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const { user } = getAuthedUserFromRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  return res.json({
+    ok: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      createdAt: user.createdAt,
+    },
+  });
+});
+
+app.post("/api/auth/profile", (req, res) => {
+  try {
+    const { user } = getAuthedUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const updated = updateProfile(user.id, {
+      displayName: String(req.body?.displayName || ""),
+    });
+
+    return res.json({ ok: true, user: updated });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Failed to update profile." });
+  }
+});
+
+app.get("/api/account/dashboard", (req, res) => {
+  try {
+    const { user } = getAuthedUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const dashboard = getDashboard(user.id);
+    return res.json({ ok: true, dashboard });
+  } catch {
+    return res.status(500).json({ error: "Failed to load dashboard." });
+  }
+});
+
+app.post("/api/account/rooms/touch", (req, res) => {
+  const { user } = getAuthedUserFromRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const roomId = normalizeRoomId(req.body?.roomId || "");
+  touchRoom(user.id, roomId);
+  return res.json({ ok: true });
+});
+
+app.post("/api/account/history/touch", (req, res) => {
+  const { user } = getAuthedUserFromRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const roomId = normalizeRoomId(req.body?.roomId || "");
+  const mediaType = String(req.body?.mediaType || "blob");
+  const title = String(req.body?.title || "Untitled");
+  const mediaId = String(req.body?.mediaId || "");
+
+  addWatchHistory(user.id, { roomId, mediaType, title, mediaId });
+  return res.json({ ok: true });
+});
+
+app.post("/api/account/saved-playlists/:roomId", (req, res) => {
+  try {
+    const { user } = getAuthedUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const roomId = normalizeRoomId(req.params.roomId);
+    const playlist = Array.isArray(req.body?.playlist) ? req.body.playlist : [];
+
+    const saved = saveRoomPlaylist(user.id, roomId, playlist);
+    return res.json({ ok: true, savedPlaylist: saved });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Failed to save playlist." });
+  }
+});
+
+app.get("/api/account/saved-playlists/:roomId", (req, res) => {
+  const { user } = getAuthedUserFromRequest(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const roomId = normalizeRoomId(req.params.roomId);
+  const saved = getSavedPlaylist(user.id, roomId);
+  return res.json({ ok: true, savedPlaylist: saved });
 });
 
 app.post("/api/upload/:roomId", upload.single("video"), async (req, res) => {
@@ -1076,3 +1230,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
