@@ -52,20 +52,6 @@ const toggleVideoBtn = document.getElementById("toggleVideoBtn");
 const voiceStatus = document.getElementById("voiceStatus");
 const camDock = document.getElementById("camDock");
 
-const authUsernameInput = document.getElementById("authUsernameInput");
-const authPasswordInput = document.getElementById("authPasswordInput");
-const authDisplayNameInput = document.getElementById("authDisplayNameInput");
-const registerBtn = document.getElementById("registerBtn");
-const loginBtn = document.getElementById("loginBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const updateProfileBtn = document.getElementById("updateProfileBtn");
-const refreshAccountBtn = document.getElementById("refreshAccountBtn");
-const savePlaylistSnapshotBtn = document.getElementById("savePlaylistSnapshotBtn");
-const authStatusText = document.getElementById("authStatusText");
-const authProfileText = document.getElementById("authProfileText");
-const myRoomsList = document.getElementById("myRoomsList");
-const watchHistoryList = document.getElementById("watchHistoryList");
-const savedPlaylistsList = document.getElementById("savedPlaylistsList");
 
 let currentRoomId = "";
 let currentHostId = "";
@@ -94,11 +80,6 @@ let localVideoTile = null;
 let localVideoEnabled = false;
 let authToken = localStorage.getItem("watchparty_auth_token") || "";
 let authUser = null;
-let accountDashboard = {
-  rooms: [],
-  watchHistory: [],
-  savedPlaylists: [],
-};
 let lastHistoryMediaKey = "";
 const emojiPalette = [0x1F600, 0x1F602, 0x1F60D, 0x1F973, 0x1F525, 0x1F44F, 0x1F64C, 0x1F44D, 0x2764, 0x1F4AF, 0x1F3AC, 0x1F37F, 0x1F60E, 0x1F92F, 0x1F62D, 0x1F634, 0x1F91D, 0x2728, 0x1F389, 0x1F440, 0x2705, 0x274C, 0x1F916, 0x1F4AC].map((code) => String.fromCodePoint(code));
 const defaultIceServers = [{ urls: ["stun:stun.l.google.com:19302"] }];
@@ -248,117 +229,9 @@ function getAuthHeaders() {
   return headers;
 }
 
-function setAuthStatus(message, tone = "neutral") {
-  authStatusText.textContent = message || "";
-  authStatusText.classList.remove("ok", "error");
-  if (tone === "ok" || tone === "error") {
-    authStatusText.classList.add(tone);
-  }
-}
-
-function setAccountUiState() {
-  const loggedIn = Boolean(authUser && authToken);
-
-  loginBtn.disabled = loggedIn;
-  registerBtn.disabled = loggedIn;
-  logoutBtn.disabled = !loggedIn;
-  updateProfileBtn.disabled = !loggedIn;
-  refreshAccountBtn.disabled = !loggedIn;
-  savePlaylistSnapshotBtn.disabled = !loggedIn || !currentRoomId || !playlist.length;
-
-  loginBtn.classList.toggle("disabled", loginBtn.disabled);
-  registerBtn.classList.toggle("disabled", registerBtn.disabled);
-  logoutBtn.classList.toggle("disabled", logoutBtn.disabled);
-  updateProfileBtn.classList.toggle("disabled", updateProfileBtn.disabled);
-  refreshAccountBtn.classList.toggle("disabled", refreshAccountBtn.disabled);
-  savePlaylistSnapshotBtn.classList.toggle("disabled", savePlaylistSnapshotBtn.disabled);
-
-  if (loggedIn) {
-    authProfileText.textContent = `Profile: ${authUser.displayName} (@${authUser.username})`;
-    if (!nameInput.value.trim()) {
-      nameInput.value = authUser.displayName;
-    }
-  } else {
-    authProfileText.textContent = "Profile: -";
-  }
-}
-
-function renderCompactList(container, rows, emptyText) {
-  container.innerHTML = "";
-
-  if (!rows.length) {
-    const li = document.createElement("li");
-    li.className = "muted";
-    li.textContent = emptyText;
-    container.appendChild(li);
-    return;
-  }
-
-  rows.forEach((row) => {
-    const li = document.createElement("li");
-    li.innerHTML = row;
-    container.appendChild(li);
-  });
-}
-
-function renderAccountDashboard() {
-  const roomsRows = (accountDashboard.rooms || []).map((entry) => {
-    const when = new Date(entry.lastJoinedAt || Date.now()).toLocaleString();
-    return `<strong>${entry.roomId}</strong><br><span class="muted">Last joined: ${when}</span>`;
-  });
-
-  const historyRows = (accountDashboard.watchHistory || []).slice(0, 12).map((entry) => {
-    const when = new Date(entry.watchedAt || Date.now()).toLocaleString();
-    return `<strong>${entry.title || "Untitled"}</strong><br><span class="muted">${entry.roomId} | ${entry.mediaType} | ${when}</span>`;
-  });
-
-  const savedRows = (accountDashboard.savedPlaylists || []).map((entry) => {
-    const when = new Date(entry.savedAt || Date.now()).toLocaleString();
-    return `<strong>${entry.roomId}</strong><br><span class="muted">${entry.itemCount} items | Saved: ${when}</span>`;
-  });
-
-  renderCompactList(myRoomsList, roomsRows, "No rooms yet.");
-  renderCompactList(watchHistoryList, historyRows, "No watch history yet.");
-  renderCompactList(savedPlaylistsList, savedRows, "No saved playlists yet.");
-}
-
-async function fetchAccountDashboard() {
-  if (!authToken) return;
-
-  try {
-    const response = await fetch("/api/account/dashboard", {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-
-    const payload = await response.json();
-    if (!response.ok || !payload.dashboard) {
-      if (response.status === 401) {
-        authToken = "";
-        authUser = null;
-        localStorage.removeItem("watchparty_auth_token");
-      }
-      return;
-    }
-
-    accountDashboard = payload.dashboard;
-    if (payload.dashboard.user) {
-      authUser = payload.dashboard.user;
-    }
-    renderAccountDashboard();
-    setAccountUiState();
-  } catch {
-    // ignore transient dashboard fetch errors
-  }
-}
-
 async function refreshAuthSession() {
   if (!authToken) {
-    authUser = null;
-    accountDashboard = { rooms: [], watchHistory: [], savedPlaylists: [] };
-    renderAccountDashboard();
-    setAccountUiState();
-    setAuthStatus("Not logged in.", "neutral");
+    window.location.href = "/auth.html?next=/watch-party.html";
     return;
   }
 
@@ -370,23 +243,19 @@ async function refreshAuthSession() {
 
     const payload = await response.json();
     if (!response.ok || !payload.user) {
-      authToken = "";
-      authUser = null;
       localStorage.removeItem("watchparty_auth_token");
-      setAuthStatus(payload.error || "Session expired. Please login again.", "error");
-      setAccountUiState();
+      authToken = "";
+      window.location.href = "/auth.html?next=/watch-party.html";
       return;
     }
 
     authUser = payload.user;
-    authDisplayNameInput.value = authUser.displayName || "";
-    setAuthStatus(`Logged in as @${authUser.username}`, "ok");
-    await fetchAccountDashboard();
+    if (!nameInput.value.trim()) {
+      nameInput.value = authUser.displayName || "";
+    }
   } catch {
-    setAuthStatus("Failed to restore login session.", "error");
+    statusText.textContent = "Failed to verify login session.";
   }
-
-  setAccountUiState();
 }
 
 async function authRequest(url, body) {
@@ -408,7 +277,6 @@ async function touchMyRoom(roomId) {
   if (!authToken || !roomId) return;
   try {
     await authRequest("/api/account/rooms/touch", { roomId });
-    void fetchAccountDashboard();
   } catch {
     // no-op
   }
@@ -461,6 +329,7 @@ async function touchWatchHistory(roomId, media) {
     // no-op
   }
 }
+
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
   const mins = Math.floor(seconds / 60);
@@ -1735,110 +1604,6 @@ async function applyRemoteState(payload) {
   }
 }
 
-registerBtn.addEventListener("click", async () => {
-  const username = authUsernameInput.value.trim();
-  const password = authPasswordInput.value;
-  const displayName = authDisplayNameInput.value.trim();
-
-  if (!username || !password) {
-    setAuthStatus("Username and password are required.", "error");
-    return;
-  }
-
-  try {
-    const payload = await authRequest("/api/auth/register", { username, password, displayName });
-    authToken = payload.token || "";
-    authUser = payload.user || null;
-    if (authToken) {
-      localStorage.setItem("watchparty_auth_token", authToken);
-    }
-    setAuthStatus("Registration successful.", "ok");
-    await fetchAccountDashboard();
-    setAccountUiState();
-  } catch (error) {
-    setAuthStatus(error.message || "Registration failed.", "error");
-  }
-});
-
-loginBtn.addEventListener("click", async () => {
-  const username = authUsernameInput.value.trim();
-  const password = authPasswordInput.value;
-
-  if (!username || !password) {
-    setAuthStatus("Username and password are required.", "error");
-    return;
-  }
-
-  try {
-    const payload = await authRequest("/api/auth/login", { username, password });
-    authToken = payload.token || "";
-    authUser = payload.user || null;
-    if (authToken) {
-      localStorage.setItem("watchparty_auth_token", authToken);
-    }
-    setAuthStatus("Login successful.", "ok");
-    await fetchAccountDashboard();
-    setAccountUiState();
-  } catch (error) {
-    setAuthStatus(error.message || "Login failed.", "error");
-  }
-});
-
-logoutBtn.addEventListener("click", async () => {
-  try {
-    if (authToken) {
-      await authRequest("/api/auth/logout", {});
-    }
-  } catch {
-    // no-op
-  }
-
-  authToken = "";
-  authUser = null;
-  accountDashboard = { rooms: [], watchHistory: [], savedPlaylists: [] };
-  lastHistoryMediaKey = "";
-  localStorage.removeItem("watchparty_auth_token");
-  renderAccountDashboard();
-  setAuthStatus("Logged out.", "neutral");
-  setAccountUiState();
-});
-
-updateProfileBtn.addEventListener("click", async () => {
-  if (!authToken) return;
-  const displayName = authDisplayNameInput.value.trim();
-  if (!displayName) {
-    setAuthStatus("Display name cannot be empty.", "error");
-    return;
-  }
-
-  try {
-    const payload = await authRequest("/api/auth/profile", { displayName });
-    authUser = payload.user || authUser;
-    setAuthStatus("Profile updated.", "ok");
-    setAccountUiState();
-  } catch (error) {
-    setAuthStatus(error.message || "Failed to update profile.", "error");
-  }
-});
-
-refreshAccountBtn.addEventListener("click", async () => {
-  await fetchAccountDashboard();
-  setAuthStatus("Account data refreshed.", "ok");
-});
-
-savePlaylistSnapshotBtn.addEventListener("click", async () => {
-  if (!authToken || !currentRoomId || !playlist.length) return;
-
-  try {
-    await authRequest(`/api/account/saved-playlists/${currentRoomId}`, {
-      playlist,
-    });
-    await fetchAccountDashboard();
-    setAuthStatus("Playlist saved to your account.", "ok");
-  } catch (error) {
-    setAuthStatus(error.message || "Failed to save playlist.", "error");
-  }
-});
 joinBtn.addEventListener("click", () => {
   if (voiceJoined) {
     leaveVoiceChat(true);
@@ -2365,7 +2130,6 @@ document.addEventListener("visibilitychange", () => {
 });
 
 renderEmojiPicker();
-renderAccountDashboard();
 void refreshAuthSession();
 updateJoinParticipantsCount();
 setVoiceButtonsState();
@@ -2374,6 +2138,4 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
-
-
 

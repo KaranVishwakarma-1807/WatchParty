@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WatchParty Login</title>
+  <link rel="stylesheet" href="auth.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <h1>WatchParty</h1>
+      <p id="authInfo" class="muted">Login to continue</p>
+
+      <label>
+        Username
+        <input id="usernameInput" type="text" placeholder="kookiee" />
+      </label>
+
+      <label>
+        Password
+        <input id="passwordInput" type="password" placeholder="******" />
+      </label>
+
+      <label>
+        Display Name (for register)
+        <input id="displayNameInput" type="text" placeholder="Kookiee" />
+      </label>
+
+      <div class="actions">
+        <button id="loginBtn" type="button">Login</button>
+        <button id="registerBtn" type="button">Register</button>
+      </div>
+
+      <p id="statusText" class="status">-</p>
+    </section>
+  </main>
+
+  <script src="auth.js"></script>
+</body>
+</html>
+
