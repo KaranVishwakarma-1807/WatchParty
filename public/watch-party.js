@@ -5,6 +5,7 @@ const nameInput = document.getElementById("nameInput");
 const joinBtn = document.getElementById("joinBtn");
 const joinParticipantsText = document.getElementById("joinParticipantsText");
 const statusText = document.getElementById("statusText");
+const accountBtn = document.getElementById("accountBtn");
 const roleText = document.getElementById("roleText");
 const hostText = document.getElementById("hostText");
 const memberList = document.getElementById("memberList");
@@ -250,6 +251,10 @@ async function refreshAuthSession() {
     }
 
     authUser = payload.user;
+    if (accountBtn) {
+      const seed = String(authUser.displayName || authUser.username || "U").trim();
+      accountBtn.textContent = seed ? seed.slice(0, 1).toUpperCase() : "U";
+    }
     if (!nameInput.value.trim()) {
       nameInput.value = authUser.displayName || "";
     }
@@ -1604,6 +1609,12 @@ async function applyRemoteState(payload) {
   }
 }
 
+if (accountBtn) {
+  accountBtn.addEventListener("click", () => {
+    window.location.href = "/my-room";
+  });
+}
+
 joinBtn.addEventListener("click", () => {
   if (voiceJoined) {
     leaveVoiceChat(true);
@@ -2138,4 +2149,9 @@ refreshExternalUrlValidation();
 updateSpeedOptionsForMode();
 refreshSubtitleOptions();
 refreshAudioTrackOptions();
+
+
+
+
+
 

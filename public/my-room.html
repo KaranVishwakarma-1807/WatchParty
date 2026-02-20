@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Room | WatchParty</title>
+  <link rel="stylesheet" href="my-room.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="card topbar">
+      <div>
+        <h1>My Room</h1>
+        <p id="topInfo" class="muted">Account dashboard</p>
+      </div>
+      <div class="top-actions">
+        <button id="backWatchBtn" type="button">Back to Watch Party</button>
+        <button id="logoutBtn" type="button">Logout</button>
+      </div>
+    </header>
+
+    <section class="card account-card">
+      <h2>My Account</h2>
+      <div class="account-grid">
+        <label>
+          Username
+          <input id="usernameInput" type="text" disabled />
+        </label>
+        <label>
+          Display Name
+          <input id="displayNameInput" type="text" maxlength="40" />
+        </label>
+        <label>
+          Joined
+          <input id="createdAtInput" type="text" disabled />
+        </label>
+      </div>
+      <div class="account-actions">
+        <button id="saveProfileBtn" type="button">Save Profile</button>
+      </div>
+      <p id="statusText" class="status">-</p>
+    </section>
+
+    <section class="grid">
+      <article class="card panel">
+        <h3>My Rooms</h3>
+        <ul id="roomsList" class="list"></ul>
+      </article>
+
+      <article class="card panel">
+        <h3>Watch History</h3>
+        <ul id="historyList" class="list"></ul>
+      </article>
+
+      <article class="card panel panel-wide">
+        <h3>Saved Playlists</h3>
+        <ul id="savedPlaylistsList" class="list"></ul>
+      </article>
+    </section>
+  </main>
+
+  <script src="my-room.js"></script>
+</body>
+</html>

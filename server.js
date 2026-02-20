@@ -464,8 +464,13 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "auth.html"));
 });
 
+
 app.get("/watch", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "watch-party.html"));
+});
+
+app.get("/my-room", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "my-room.html"));
 });
 app.get("/api/rtc-config", (_req, res) => {
   res.json({
@@ -1234,6 +1239,9 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
+
 
 
 
