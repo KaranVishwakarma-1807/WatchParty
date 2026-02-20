@@ -461,6 +461,10 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "auth.html"));
+});
+
+app.get("/watch", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "watch-party.html"));
 });
 app.get("/api/rtc-config", (_req, res) => {
@@ -1230,4 +1234,7 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Watch party server running on http://localhost:${PORT}`);
 });
+
+
+
 
